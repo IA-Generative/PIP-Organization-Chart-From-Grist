@@ -68,6 +68,11 @@ Puis lancez :
 python -m src.cli full-run --api --pi PI-10
 ```
 
+Option mission d'equipe par LLM (Scaleway) :
+- définir `SCW_SECRET_KEY_LLM` dans l'environnement
+- optionnel : `SCW_LLM_MODEL` (défaut `gpt-oss-120b`) et `SCW_LLM_BASE_URL`
+- sans clé ou en cas d'erreur API, le script utilise un fallback local
+
 Si les paramètres API ne sont pas configurés, le script bascule en mode fichier local et vous indiquera quoi faire.
 
 ## Sorties

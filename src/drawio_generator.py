@@ -51,15 +51,59 @@ def _format_team_info_value(team: TeamModel, max_members_display: int = 12) -> s
     return "<br/>".join(lines)
 
 
+def _format_team_mission_value(team: TeamModel) -> str:
+    mission = (team.mission_summary or "").strip() or "Mission non renseignee."
+    next_inc = (team.next_increment_summary or "").strip() or "Intention prochain increment non renseignee."
+    mission_html = _html_escape(mission).replace("\n", "<br/>")
+    next_html = _html_escape(next_inc).replace("\n", "<br/>")
+    suffix = " (résumé par IA)" if team.summary_ai_used else ""
+    return (
+        f'<div style="text-align:center;color:#1f4e79;"><b>Mission{_html_escape(suffix)}</b></div>'
+        f"<br/>{mission_html}"
+        "<br/><br/>"
+        f'<div style="text-align:center;color:#1f4e79;"><b>Intention prochain increment (3 mois){_html_escape(suffix)}</b></div>'
+        "<br/>"
+        f"{next_html}"
+    )
+
+
+def _format_team_warning_value(team: TeamModel) -> str:
+    warning = (team.summary_warning or "").strip()
+    return _html_escape(warning) if warning else ""
+
+
+def _format_team_kpi_value(team: TeamModel) -> str:
+    kpis = (team.kpi_summary or "").strip() or "Indicateurs non renseignes."
+    suggestion = (team.kpi_ai_suggestion or "").strip() or "Suggestion IA non disponible."
+    kpi_html = _html_escape(kpis).replace("\n", "<br/>")
+    suggestion_html = _html_escape(suggestion).replace("\n", "<br/>")
+    suffix = " (résumé par IA)" if team.summary_ai_used else ""
+    return (
+        f'<div style="text-align:center;color:#1f4e79;"><b>Indicateurs clés (OKR / KPI){_html_escape(suffix)}</b></div>'
+        '<table style="width:100%; border-collapse:collapse; margin-top:6px;" cellspacing="0" cellpadding="0">'
+        "<tr>"
+        '<td style="width:50%; vertical-align:top; border-right:1px solid #a5d6a7; padding-right:8px;">'
+        '<div style="text-align:center;color:#1f4e79;"><b>Synthèse indicateurs</b></div>'
+        f'<div style="margin-top:4px;">{kpi_html}</div>'
+        "</td>"
+        '<td style="width:50%; vertical-align:top; padding-left:8px;">'
+        '<div style="text-align:center;color:#1f4e79;"><b>Critique / suggestion IA</b></div>'
+        f'<div style="margin-top:4px;">{suggestion_html}</div>'
+        "</td>"
+        "</tr>"
+        "</table>"
+    )
+
+
 def build_drawio(
     model: BuiltModel,
     layout: Layout,
     high_fragmented_people: Optional[List[str]] = None,
     low_or_unassigned_people: Optional[List[str]] = None,
 ) -> str:
-    mx = ET.Element("mxGraphModel", {"dx": "1200", "dy": "800", "grid": "1", "gridSize": "10", "guides": "1",
+    mx = ET.Element("mxGraphModel", {"dx": "1654", "dy": "1169", "grid": "1", "gridSize": "10", "guides": "1",
                                     "tooltips": "1", "connect": "1", "arrows": "1", "fold": "1", "page": "1",
-                                    "pageScale": "1", "pageWidth": "1169", "pageHeight": "827", "math": "0",
+                                    "pageScale": "1", "pageWidth": "1654", "pageHeight": "1169", "math": "0",
                                     "shadow": "0"})
     root = ET.SubElement(mx, "root")
     _mx_cell(root, id="0")
@@ -70,13 +114,13 @@ def build_drawio(
     # Cartouche
     cart = layout.cartouche
     cart_value = _escape(f"🗂️ PI Planning SDID – {model.pi}")
-    cart_style = "rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=18;fontStyle=1;fillColor=#f5f5f5;strokeColor=#999999;spacingLeft=10;spacingRight=10;"
+    cart_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=18;fontStyle=1;fillColor=#f5f5f5;strokeColor=#999999;spacingLeft=10;spacingRight=10;"
     c = _mx_cell(root, id=str(next_id), value=cart_value, style=cart_style, vertex="1", parent="1")
     _mx_geometry(c, cart.x, cart.y, cart.w, cart.h)
     next_id += 1
 
-    alert_style_left = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fde2e2;strokeColor=#c0392b;"
-    alert_style_right = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fff3cd;strokeColor=#d6b656;"
+    alert_style_left = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fde2e2;strokeColor=#c0392b;"
+    alert_style_right = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fff3cd;strokeColor=#d6b656;"
     if layout.high_fragmentation_box:
         people = high_fragmented_people or []
         lines = ['<div style="text-align:center;"><b>Affecté sur plusieurs EPICS</b></div>']
@@ -104,11 +148,28 @@ def build_drawio(
         next_id += 1
 
     # Teams containers
-    team_style = "swimlane;rounded=1;whiteSpace=wrap;html=1;startSize=40;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacingLeft=10;spacingRight=8;"
-    team_info_style = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=11;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#f8f9fa;strokeColor=#b0b0b0;"
-    epic_style = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#dae8fc;strokeColor=#6c8ebf;"
-    epic_sep_style = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fff2cc;strokeColor=#d6b656;"
-    sep_header_style = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fontSize=14;fontStyle=1;spacingLeft=12;spacingRight=10;fillColor=#fff2cc;strokeColor=#d6b656;"
+    team_style = "swimlane;rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;startSize=40;fillColor=#ffffff;strokeColor=#666666;fontSize=14;spacingLeft=10;spacingRight=8;"
+    team_info_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=11;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#f8f9fa;strokeColor=#b0b0b0;"
+    team_mission_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=11;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#eef6ff;strokeColor=#7ea6d8;"
+    team_kpi_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=11;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#eaf7ea;strokeColor=#6aa84f;"
+    team_warning_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#4a4a4a;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#f2f2f2;strokeColor=#c7c7c7;"
+    theme_header_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fontSize=13;fontStyle=1;fillColor=#e9ecef;strokeColor=#adb5bd;"
+    epic_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#dae8fc;strokeColor=#6c8ebf;"
+    epic_sep_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;spacingLeft=12;spacingRight=10;fillColor=#fff2cc;strokeColor=#d6b656;"
+    sep_header_style = "rounded=1;arcSize=6;absoluteArcSize=1;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;fontSize=14;fontStyle=1;spacingLeft=12;spacingRight=10;fillColor=#fff2cc;strokeColor=#d6b656;"
+
+    # Theme headers
+    for title, hb in layout.theme_header_boxes:
+        hcell = _mx_cell(
+            root,
+            id=str(next_id),
+            value=_escape(title),
+            style=theme_header_style,
+            vertex="1",
+            parent="1",
+        )
+        _mx_geometry(hcell, hb.x, hb.y, hb.w, hb.h)
+        next_id += 1
 
     # Add team cells and child epics
     for team in model.teams:
@@ -124,6 +185,65 @@ def build_drawio(
         icell = _mx_cell(root, id=str(next_id), value=info_value, style=team_info_style, vertex="1", parent=team_id)
         _mx_geometry(icell, info_box.x - tb.x, info_box.y - tb.y, info_box.w, info_box.h)
         next_id += 1
+
+        mission_box = layout.team_mission_boxes[team.id]
+        mission_value = _format_team_mission_value(team)
+        mcell = _mx_cell(
+            root,
+            id=str(next_id),
+            value=mission_value,
+            style=team_mission_style,
+            vertex="1",
+            parent=team_id,
+        )
+        _mx_geometry(
+            mcell,
+            mission_box.x - tb.x,
+            mission_box.y - tb.y,
+            mission_box.w,
+            mission_box.h,
+        )
+        next_id += 1
+
+        kpi_box = layout.team_kpi_boxes[team.id]
+        kpi_value = _format_team_kpi_value(team)
+        kcell = _mx_cell(
+            root,
+            id=str(next_id),
+            value=kpi_value,
+            style=team_kpi_style,
+            vertex="1",
+            parent=team_id,
+        )
+        _mx_geometry(
+            kcell,
+            kpi_box.x - tb.x,
+            kpi_box.y - tb.y,
+            kpi_box.w,
+            kpi_box.h,
+        )
+        next_id += 1
+
+        warning_box = layout.team_warning_boxes.get(team.id)
+        if warning_box:
+            warning_value = _format_team_warning_value(team)
+            if warning_value:
+                wcell = _mx_cell(
+                    root,
+                    id=str(next_id),
+                    value=warning_value,
+                    style=team_warning_style,
+                    vertex="1",
+                    parent=team_id,
+                )
+                _mx_geometry(
+                    wcell,
+                    warning_box.x - tb.x,
+                    warning_box.y - tb.y,
+                    warning_box.w,
+                    warning_box.h,
+                )
+                next_id += 1
 
         # epics inside
         for epic in team.epics:
@@ -141,14 +261,6 @@ def build_drawio(
             ecell = _mx_cell(root, id=str(next_id), value=epic_value, style=epic_style, vertex="1", parent=team_id)
             _mx_geometry(ecell, eb.x - tb.x, eb.y - tb.y, eb.w, eb.h)  # relative to container
             next_id += 1
-
-    # Separate epics section header (if any)
-    if model.separate_epics:
-        # header box above first separate epic
-        first = next(iter(layout.separate_epic_boxes.values()))
-        header = _mx_cell(root, id=str(next_id), value=_escape("🧩 Epics séparées / transverses"), style=sep_header_style, vertex="1", parent="1")
-        _mx_geometry(header, first.x, first.y - 45, first.w, 35)
-        next_id += 1
 
     for epic in model.separate_epics:
         eb = layout.separate_epic_boxes[epic.id]
@@ -183,11 +295,15 @@ def _format_epic_value(
         lines.append(f"<b>Membres equipe :</b> {_html_escape(members_text)}")
     if show_po and epic.assignments:
         lines.append(f"<b>PO epic :</b> {_html_escape(po)}")
-    lines.append("—")
+    has_details = bool(epic.assignments or epic.features)
+    if has_details:
+        lines.append("—")
     if epic.assignments:
         for a in epic.assignments:
+            person = (a.person or "").strip() or "—"
+            role = (a.role or "").strip() or "—"
             lines.append(
-                f"{_html_escape(a.person)} – {_html_escape(a.role)} – {_format_charge_percent(a.charge)}"
+                f"{_html_escape(person)} – {_html_escape(role)} – {_format_charge_percent(a.charge)}"
             )
     else:
         lines.append("(aucune affectation specifique)")

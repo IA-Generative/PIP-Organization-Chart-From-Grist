@@ -19,6 +19,7 @@ from .analytics import compute_fragmentation
 from .report_generator import write_fragmentation_reports, write_run_summary
 from .readme_generator import generate_readme
 from .ref_utils import parse_ref_id
+from .team_mission_summarizer import populate_team_missions
 
 
 def _load_mapping(repo_root: Path) -> dict:
@@ -110,10 +111,13 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
     if frag_df is None or frag_df.empty:
         return [], all_people
 
-    # Rule: elevated fragmentation if a person is assigned to at least 2 epics.
-    high_frag_df = frag_df.loc[frag_df["Nb_Epics"] >= 2].sort_values(
-        ["Nb_Epics", "Score_Fragmentation", "Total_Charge", "Agent"],
-        ascending=[False, False, False, True],
+    # Rule: elevated fragmentation if a person is assigned to at least 2 epics
+    # OR is spread across at least 2 teams.
+    high_frag_df = frag_df.loc[
+        (frag_df["Nb_Epics"] >= 2) | (frag_df["Nb_Equipes"] >= 2)
+    ].sort_values(
+        ["Nb_Epics", "Nb_Equipes", "Score_Fragmentation", "Total_Charge", "Agent"],
+        ascending=[False, False, False, False, True],
     )
     high_fragmented_names = [
         str(x).strip() for x in high_frag_df["Agent"].tolist() if str(x).strip() and str(x) != "UNKNOWN"
@@ -162,7 +166,7 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
         if epics:
             high_fragmented.append(f"{person} ({', '.join(epics)})")
         else:
-            high_fragmented.append(f"{person} (—)")
+            high_fragmented.append(f"{person} (multi-équipes)")
 
     return high_fragmented, low_or_unassigned
 
@@ -224,6 +228,7 @@ def cmd_full_run(args) -> int:
     high_fragmented, low_or_unassigned = _compute_alert_people_lists(data, mapping, frag_df)
 
     model = build_model(data=data, mapping=mapping, pi=pi)
+    populate_team_missions(model)
     layout = compute_layout(
         model,
         high_fragmented_people=high_fragmented,

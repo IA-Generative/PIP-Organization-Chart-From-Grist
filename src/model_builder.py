@@ -37,6 +37,12 @@ class TeamModel:
     po_list: List[str]
     people_team: Set[str]
     epics: List[EpicModel]
+    mission_summary: str = ""
+    next_increment_summary: str = ""
+    kpi_summary: str = ""
+    kpi_ai_suggestion: str = ""
+    summary_ai_used: bool = False
+    summary_warning: str = ""
 
 
 @dataclass
@@ -49,6 +55,11 @@ class BuiltModel:
 
 def _safe_str(x) -> str:
     return "" if x is None else str(x)
+
+
+def _is_blank_like(value) -> bool:
+    s = _safe_str(value).strip()
+    return not s or s.lower() == "nan"
 
 
 def _norm_col_name(name: str) -> str:
@@ -115,7 +126,15 @@ def build_model(
     epic_name = cols["epic_name"]
     epic_desc = cols["epic_description"]
     epic_int_pi = cols["epic_intention_pi"]
-    epic_int_next = cols["epic_intention_next"]
+    epic_int_next = _resolve_column_name(
+        epics,
+        cols["epic_intention_next"],
+        aliases=[
+            "Intention_prochain_Increment_a_3_mois",
+            "Intention_du_prochain_Increment_ou_MVP_impact_a_3_mois_",
+            "Intention prochain Increment a 3 mois",
+        ],
+    ) or cols["epic_intention_next"]
 
     for c in [epic_name]:
         if c not in epics.columns:
@@ -200,7 +219,13 @@ def build_model(
     features_by_epic: Dict[int, List[str]] = {}
     if not features_pi.empty:
         for eid, grp in features_pi.groupby(f_epic):
-            features_by_epic[int(eid)] = grp[f_name].astype(str).tolist()
+            clean_features = [
+                _safe_str(v).strip()
+                for v in grp[f_name].tolist()
+                if not _is_blank_like(v)
+            ]
+            if clean_features:
+                features_by_epic[int(eid)] = clean_features
 
     # Epics name map
     epics_index = epics.set_index("id")
@@ -226,6 +251,52 @@ def build_model(
             is_separate=is_separate,
         )
 
+    # Build team->epics mapping with priority to Epics owner columns.
+    team_ids: Set[int] = {int(x) for x in equipes["id"].tolist()}
+    team_to_epics: Dict[int, List[int]] = {tid: [] for tid in team_ids}
+    epic_owner_team: Dict[int, int] = {}
+
+    # 1) Preferred source: Epics table owner link (Equipe / Equipe_portant_l_Epic).
+    epic_owner_col = _resolve_column_name(
+        epics,
+        preferred="Equipe",
+        aliases=["Equipe_portant_l_Epic", "EquipePortantLEpic", "Team", "OwnerTeam"],
+    )
+    if epic_owner_col and "id" in epics.columns:
+        for _, erow in epics.iterrows():
+            eid = parse_ref_id(erow.get("id"))
+            if not eid:
+                continue
+            owner_refs = parse_ref_list(erow.get(epic_owner_col))
+            owner_refs = [tid for tid in owner_refs if tid in team_ids]
+            if owner_refs:
+                epic_owner_team[eid] = owner_refs[0]
+
+    # 2) Fallback source: Equipes.Epics mapping for epics not assigned above.
+    if cols["equipe_epics"] in equipes.columns:
+        for _, trow in equipes.iterrows():
+            tid = int(trow["id"])
+            epics_val = trow.get(cols["equipe_epics"])
+            for eid in parse_ref_list(epics_val):
+                if eid not in epic_owner_team:
+                    epic_owner_team[eid] = tid
+
+    # Build ordered list of epics per team from owner map.
+    for eid, tid in epic_owner_team.items():
+        if tid in team_to_epics:
+            team_to_epics[tid].append(eid)
+
+    # Deduplicate while preserving order.
+    for tid in list(team_to_epics.keys()):
+        seen_local: Set[int] = set()
+        dedup_ids: List[int] = []
+        for eid in team_to_epics[tid]:
+            if eid in seen_local:
+                continue
+            seen_local.add(eid)
+            dedup_ids.append(eid)
+        team_to_epics[tid] = dedup_ids
+
     # Build teams with epics
     teams: List[TeamModel] = []
     separate_epics: List[EpicModel] = []
@@ -238,20 +309,13 @@ def build_model(
         pm_list = team_pms.get(tid, [])
         po_list = team_pos.get(tid, [])
 
-        # Epics refList can be stored as JSON-like string, or array, or None.
-        epics_val = trow.get(cols["equipe_epics"])
-        epic_ids = parse_ref_list(epics_val)
+        epic_ids = team_to_epics.get(tid, [])
 
         epic_models: List[EpicModel] = []
         for eid in epic_ids:
             epic_ids_seen.add(eid)
-            people_e = epic_people.get(eid, set())
-            is_sep = bool(people_e and not people_e.issubset(people_t))
-            em = build_epic(eid, is_sep)
-            if is_sep:
-                separate_epics.append(em)
-            else:
-                epic_models.append(em)
+            em = build_epic(eid, False)
+            epic_models.append(em)
 
         teams.append(
             TeamModel(
@@ -261,10 +325,14 @@ def build_model(
                 po_list=po_list,
                 people_team=people_t,
                 epics=epic_models,
+                mission_summary="",
+                next_increment_summary="",
+                summary_ai_used=False,
+                summary_warning="",
             )
         )
 
-    # Any epic referenced in features for this PI but not listed in team refList -> treat as separate epic
+    # Any epic referenced in features for this PI but not linked to a team -> separate epic
     for eid in features_by_epic.keys():
         if eid not in epic_ids_seen:
             separate_epics.append(build_epic(eid, True))
