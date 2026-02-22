@@ -1,0 +1,7 @@
+nom,nb_equipes,nb_epics,nb_assignments,charge_totale,roles,fragmentation_score,multi_equipes,surcharge,alerte
+Bob Dupont,2,3,3,160.0,PO,5,True,True,True
+Claire Lemaire,1,2,2,90.0,DEV,3,False,False,False
+Alice Martin,1,1,1,100.0,PM,2,False,False,False
+David Morin,1,1,1,100.0,PM,2,False,False,False
+Eva Girard,1,1,1,80.0,PO,2,False,False,False
+François Bernard,1,1,1,100.0,PM,2,False,False,False

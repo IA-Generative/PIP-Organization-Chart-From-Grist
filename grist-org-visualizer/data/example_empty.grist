@@ -1,0 +1,11 @@
+Ce fichier est un placeholder.
+
+Déposez votre fichier .grist exporté depuis Grist dans ce répertoire.
+
+Pour exporter depuis Grist :
+1. Ouvrez votre document dans Grist
+2. Menu → Exporter → Exporter le document complet
+3. Enregistrez le fichier .grist dans ce dossier data/
+
+Puis lancez :
+  python -m src.cli full-run --pi PI-10

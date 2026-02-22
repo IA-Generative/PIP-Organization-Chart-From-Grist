@@ -1,0 +1,39 @@
+# ============================================================
+# MAPPING DES TABLES GRIST
+# Personnalise les noms de tables/colonnes si votre doc diffère
+# ============================================================
+
+tables:
+  equipes: Equipes
+  personnes: Personnes
+  epics: Epics
+  features: Features
+  affectations: Affectations
+
+columns:
+  affectations:
+    equipe: Affecte_a_l_equipe
+    epic: Affecte_a_l_Epic
+    personne: Personne
+    charge: Charge
+    role: Role
+  epics:
+    nom: Nom
+    description: Description_EPIC
+    intention_pi: Intention_du_PI_en_cours
+    intention_mvp: Intention_du_prochain_Increment_ou_MVP_impact_a_3_mois_
+  features:
+    epic: Epic
+    nom: Nom
+    description: Description
+    pi_num: pi_Num
+
+roles:
+  pm: PM
+  po: PO
+  dev: DEV
+
+fragmentation:
+  # Score = nb_equipes + nb_epics + max(0, nb_assignments - 3)
+  seuil_alerte: 5
+  seuil_critique: 8
