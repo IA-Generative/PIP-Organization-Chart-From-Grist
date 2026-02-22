@@ -22,6 +22,16 @@ dist/
 
 # Local outputs
 output/
+**/output/
+output/*.drawio
+output/*.pptx
+output/README_generated.md
+output/run_summary.md
+output/multi_affectations.csv
+output/synthesis.md
+
+# Office temp files
+~$*.pptx
 
 # Credentials / secrets
 .env

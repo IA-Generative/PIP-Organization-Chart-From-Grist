@@ -131,10 +131,20 @@ def _team_info_height(team: TeamModel, max_chars: int = 58) -> int:
 def _team_mission_height(team: TeamModel, max_chars: int = 62) -> int:
     mission = (team.mission_summary or "").strip() or "Mission non renseignee."
     next_inc = (team.next_increment_summary or "").strip() or "Intention prochain increment non renseignee."
-    lines = [mission, "Intention prochain increment (3 mois)", next_inc]
-    wrapped = _wrapped_lines(lines, max_chars=max_chars)
-    # Keep extra safety so long intention text does not overflow the frame.
-    return max(140, wrapped * 16 + 44)
+    mission_lines = _wrapped_lines([mission], max_chars=max_chars)
+    next_lines = _wrapped_lines([next_inc], max_chars=max_chars)
+    # 2 label lines: "Mission" and "Intention prochain increment (3 mois)".
+    content_lines = mission_lines + next_lines + 2
+
+    # Adaptive safety: keep long texts safe, avoid large blanks on short texts.
+    if content_lines <= 12:
+        safety = 8
+    elif content_lines <= 24:
+        safety = 14
+    else:
+        safety = 24
+
+    return max(112, content_lines * 15 + 34 + safety)
 
 
 def _team_kpi_height(team: TeamModel, max_chars: int = 62) -> int:
@@ -219,53 +229,27 @@ def _build_layout_for_columns(
         def _page_bottom(y: int) -> int:
             return _page_top(y) + page_h - page_bottom_margin
 
-        # Place theme header at the top of a new page when the theme cannot start cleanly
-        # in the remaining space of the current page.
-        first_team_h = None
-        if teams_in_theme:
-            t0 = teams_in_theme[0]
-            info_h0 = _team_info_height(t0, max_chars=info_chars)
-            mission_h0 = _team_mission_height(t0, max_chars=mission_chars)
-            kpi_h0 = _team_kpi_height(t0, max_chars=mission_chars)
-            warning_h0 = _team_warning_height(t0, max_chars=mission_chars)
-            epic_heights0 = [_epic_height(e0, team=t0, max_chars=epic_chars) for e0 in t0.epics]
-            epics_content_h0 = (
-                sum(epic_heights0) + row_gap * (len(epic_heights0) - 1)
-                if epic_heights0
-                else 120
-            )
-            fixed_to_epics0 = team_header_h + 10 + info_h0 + 12 + mission_h0 + 12 + kpi_h0 + 10
-            if warning_h0 > 0:
-                fixed_to_epics0 += warning_h0 + 10
-            first_team_h = fixed_to_epics0 + epics_content_h0 + 8
+        def _abs_page_top(y: int) -> int:
+            return (max(int(y), 0) // page_h) * page_h
 
-        default_header_gap = 8
-        jump_header_gap = 2
-        moved_to_new_page_for_header = False
+        def _snap_theme_start(y: int) -> int:
+            """
+            Generic rule: thematic headers must start at page top (except the first page).
+            If y is inside a later page body, push to next page top.
+            """
+            pt = _page_top(y)
+            if pt == y_start:
+                return y
+            return pt if y == pt else (pt + page_h)
 
-        need_space = theme_header_h + default_header_gap + (first_team_h or 0)
-        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y) and _page_top(cursor_y) != y_start:
-            cursor_y = _page_top(cursor_y) + page_h
-            moved_to_new_page_for_header = True
-        # Additional rule: avoid theme headers in the middle of a page.
-        # If we are already on a later page and not at page top, push header to next page top.
-        if _page_top(cursor_y) != y_start and cursor_y > _page_top(cursor_y):
-            cursor_y = _page_top(cursor_y) + page_h
-            moved_to_new_page_for_header = True
-        theme_header_boxes.append((theme, Box(sx, cursor_y, col_w, theme_header_h)))
-        is_later_page = _page_top(cursor_y) != y_start
-        header_gap = jump_header_gap if (moved_to_new_page_for_header or is_later_page) else default_header_gap
-        cursor_y += theme_header_h + header_gap
-
-        if not teams_in_theme:
-            cursor_y += 40
-
-        for idx, team in enumerate(teams_in_theme):
-            info_h = _team_info_height(team, max_chars=info_chars)
-            mission_h = _team_mission_height(team, max_chars=mission_chars)
-            kpi_h = _team_kpi_height(team, max_chars=mission_chars)
-            warning_h = _team_warning_height(team, max_chars=mission_chars)
-            epic_heights = [_epic_height(e, team=team, max_chars=epic_chars) for e in team.epics]
+        # Pre-compute team block dimensions once for this theme.
+        team_dims: Dict[int, Tuple[int, int, int, int, List[int], int]] = {}
+        for t in teams_in_theme:
+            info_h = _team_info_height(t, max_chars=info_chars)
+            mission_h = _team_mission_height(t, max_chars=mission_chars)
+            kpi_h = _team_kpi_height(t, max_chars=mission_chars)
+            warning_h = _team_warning_height(t, max_chars=mission_chars)
+            epic_heights = [_epic_height(e, team=t, max_chars=epic_chars) for e in t.epics]
             epics_content_h = (
                 sum(epic_heights) + row_gap * (len(epic_heights) - 1)
                 if epic_heights
@@ -275,6 +259,49 @@ def _build_layout_for_columns(
             if warning_h > 0:
                 fixed_to_epics += warning_h + 10
             team_h = fixed_to_epics + epics_content_h + 8
+            team_dims[t.id] = (info_h, mission_h, kpi_h, warning_h, epic_heights, team_h)
+
+        # Place theme header at the top of a new page when the theme cannot start cleanly
+        # in the remaining space of the current page.
+        first_team_h = min((dims[5] for dims in team_dims.values()), default=None)
+
+        default_header_gap = 8
+        jump_header_gap = 2
+        moved_to_new_page_for_header = False
+
+        need_space = theme_header_h + default_header_gap + (first_team_h or 0)
+        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y) and _page_top(cursor_y) != y_start:
+            cursor_y = _page_top(cursor_y) + page_h
+            moved_to_new_page_for_header = True
+        snapped_cursor_y = _snap_theme_start(cursor_y)
+        if snapped_cursor_y != cursor_y:
+            moved_to_new_page_for_header = True
+            cursor_y = snapped_cursor_y
+        # If a header is explicitly moved to a new page, align it to the absolute
+        # top of the draw.io page grid (0, 1169, 2338, ...).
+        if moved_to_new_page_for_header and cursor_y >= page_h:
+            cursor_y = _abs_page_top(cursor_y) + 2
+        theme_header_boxes.append((theme, Box(sx, cursor_y, col_w, theme_header_h)))
+        is_later_page = _page_top(cursor_y) != y_start
+        header_gap = jump_header_gap if (moved_to_new_page_for_header or is_later_page) else default_header_gap
+        cursor_y += theme_header_h + header_gap
+
+        if not teams_in_theme:
+            cursor_y += 40
+
+        pending = list(teams_in_theme)
+        while pending:
+            remaining = _page_bottom(cursor_y) - cursor_y
+            fit = [t for t in pending if team_dims[t.id][5] <= remaining]
+            # Best-fit: choose the tallest team that fits remaining page space.
+            # This reduces local holes without breaking thematic grouping.
+            if fit:
+                team = max(fit, key=lambda t: team_dims[t.id][5])
+            else:
+                # Nothing fits: pick the smallest to minimize immediate overflow.
+                team = min(pending, key=lambda t: team_dims[t.id][5])
+
+            info_h, mission_h, kpi_h, warning_h, epic_heights, team_h = team_dims[team.id]
 
             # If team block doesn't fit in current page, move to next page when relevant.
             fresh_page_capacity = page_h - page_bottom_margin - (theme_header_h + 8)
@@ -323,6 +350,7 @@ def _build_layout_for_columns(
                 ey += eh + row_gap
 
             cursor_y += team_h + team_gap_y
+            pending.remove(team)
 
         col_heights[col_idx] = cursor_y + section_gap_y
 
@@ -376,6 +404,7 @@ def compute_layout(
     margin = 20
     cartouche_h = 50
     page_w = 1654  # A3 landscape
+    page_h = 1169  # A3 landscape
     full_w = page_w - 2 * margin
 
     cartouche = Box(x=margin, y=margin, w=full_w, h=cartouche_h)
@@ -418,7 +447,8 @@ def compute_layout(
     )
 
     if alert_h > 0 and high_fragmentation_box and unassigned_people_box:
-        alerts_y = _max_y + 20
+        # Place alerts on a dedicated new page.
+        alerts_y = ((int(_max_y) // page_h) + 1) * page_h + 2
         high_fragmentation_box = Box(
             x=high_fragmentation_box.x,
             y=alerts_y,

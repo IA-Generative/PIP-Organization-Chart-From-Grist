@@ -116,11 +116,28 @@ def _summarize_kpis_local(team: TeamModel) -> Tuple[str, str]:
         f"- Charge totale declaree : {round(total_charge, 1)}%",
         f"- Personnes impliquees : {len(people)}",
     ]
+    epic_names = [e.name for e in team.epics if _clean(e.name)]
+    focus = ", ".join(epic_names[:2]) if epic_names else "les epics du portefeuille"
     suggestion = (
-        "Suggestion IA: stabiliser 2-3 KPI cibles pour le prochain increment "
-        "(delai de livraison, adoption utilisateur, qualite) et rattacher chaque KPI a des Features mesurables."
+        f"Suggestion IA: pour {team.name}, prioriser {focus}; "
+        "definir 2-3 KPI cibles (delai, adoption, qualite) "
+        "et rattacher chaque KPI a des Features mesurables."
     )
     return _clip_lines("\n".join(kpi_lines), 8), _clip_lines(suggestion, 4)
+
+
+def _ensure_contextual_suggestion(team: TeamModel, suggestion: str) -> str:
+    text = _clean(suggestion)
+    if not text:
+        return text
+    epic_names = [e.name for e in team.epics if _clean(e.name)]
+    # If suggestion does not reference any known epic, add a short contextual anchor.
+    if epic_names and not any(name in text for name in epic_names):
+        text = (
+            f"Pour {team.name}, focus prioritaire sur {epic_names[0]}. "
+            + text
+        )
+    return _clip_lines(text, 4)
 
 
 def _llm_summaries(team: TeamModel, context: str) -> Optional[Tuple[str, str, str, str, str]]:
@@ -151,7 +168,10 @@ def _llm_summaries(team: TeamModel, context: str) -> Optional[Tuple[str, str, st
         "- indicateurs concrets, mesurables, orientés resultat\n"
         "SUGGESTION_IA:\n"
         "- max 4 lignes\n"
-        "- suggestion actionnable pour PO/PM\n"
+        "- critique + suggestion actionnable pour PO/PM\n"
+        "- obligatoirement contextualisee a l'equipe et aux epics cites\n"
+        "- citer explicitement 1 a 3 epics (noms exacts) et au moins 1 element concret "
+        "(feature, intention, charge ou role)\n"
         "- format phrases courtes (pas de markdown, pas de puces numerotees)\n"
         "Repond STRICTEMENT avec:\n"
         "MISSION:\\n...\\nINTENTIONS_MAJEURES:\\n...\\nINDICATEURS_CLES_OKR_KPI:\\n...\\nSUGGESTION_IA:\\n...\n\n"
@@ -163,7 +183,13 @@ def _llm_summaries(team: TeamModel, context: str) -> Optional[Tuple[str, str, st
         stream = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "Tu es un assistant qui redige des syntheses courtes."},
+                {
+                    "role": "system",
+                    "content": (
+                        "Tu es un coach PM/PO. "
+                        "Tes critiques sont factuelles, priorisees, contextualisees et actionnables."
+                    ),
+                },
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=420,
@@ -203,6 +229,7 @@ def _llm_summaries(team: TeamModel, context: str) -> Optional[Tuple[str, str, st
             kpis = "Indicateurs non renseignes."
         if not suggestion:
             suggestion = "Suggestion IA non disponible."
+        suggestion = _ensure_contextual_suggestion(team, suggestion)
         return mission, intentions, kpis, suggestion, compression_level
     except Exception:
         return None
