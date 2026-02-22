@@ -1,0 +1,40 @@
+# Mapping is aligned to the SDID Grist template.
+tables:
+  equipes: "Equipes"
+  personnes: "Personnes"
+  epics: "Epics"
+  features: "Features"
+  affectations: "Affectations"
+
+columns:
+  # Equipes
+  equipe_name: "Equipe"
+  equipe_epics: "Epics"
+  equipe_pm_formula: "PM"   # formula col (not used for computation; computed from Affectations)
+  equipe_po_formula: "PO"   # formula col
+
+  # Personnes
+  personne_label: "Collaborateur"
+
+  # Epics
+  epic_name: "Nom"
+  epic_description: "Description_EPIC"
+  epic_intention_pi: "Intention_du_PI_en_cours"
+  epic_intention_next: "Intention_du_prochain_Increment_ou_MVP_impact_a_3_mois_"
+
+  # Features
+  feature_epic_ref: "Epic"
+  feature_name: "Nom"
+  feature_description: "Description"
+  feature_pi: "pi_Num"
+
+  # Affectations
+  aff_team_ref: "Affecte_a_l_equipe"
+  aff_epic_ref: "Affecte_a_l_Epic"
+  aff_person_ref: "Personne"
+  aff_charge: "Charge"
+  aff_role: "Role"
+
+roles:
+  pm: "PM"
+  po: "PO"

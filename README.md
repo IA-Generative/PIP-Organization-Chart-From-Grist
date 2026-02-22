@@ -14,11 +14,23 @@ Génère automatiquement (à partir d’un Grist SDID) :
 
 Installation rapide :
 
-```bash
+```zsh
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e .
+```
+
+### Utilisateurs Conda
+
+Si vous êtes dans l'environnement `base` de Conda, vous pouvez voir des conflits de dépendances.
+Recommandation : utiliser un environnement virtuel dédié au projet.
+
+```zsh
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e .
 ```
 
 ## Utilisation
@@ -26,7 +38,7 @@ pip install -e .
 ### 1) Mode fichier local (recommandé)
 Déposez un fichier `.grist` dans `data/` (exemple fourni : `data/example_empty.grist`) ou pointez-le avec `--source`.
 
-```bash
+```zsh
 python -m src.cli full-run --source data/example_empty.grist --pi PI-10
 ```
 
@@ -35,11 +47,24 @@ Configurer les variables :
 
 - `GRIST_API_KEY`
 - `GRIST_DOC_ID`
-- (optionnel) `GRIST_BASE_URL` (défaut: https://docs.getgrist.com)
+- (optionnel) `GRIST_BASE_URL` (défaut: https://grist.numerique.gouv.fr/)
 
-Puis :
+Vous pouvez utiliser le script interactif :
 
-```bash
+```zsh
+chmod +x scripts/setup_grist_env.sh
+./scripts/setup_grist_env.sh
+```
+
+Sur macOS (shell par défaut `zsh`), rechargez le profil :
+
+```zsh
+source ~/.zshrc
+```
+
+Puis lancez :
+
+```zsh
 python -m src.cli full-run --api --pi PI-10
 ```
 
