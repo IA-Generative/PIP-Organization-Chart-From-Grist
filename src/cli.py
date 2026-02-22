@@ -111,10 +111,10 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
     if frag_df is None or frag_df.empty:
         return [], all_people
 
-    # Rule: elevated fragmentation if a person is assigned to at least 2 epics
-    # OR is spread across at least 2 teams.
+    # Rule: show in "Affecté sur plusieurs EPICS" when assigned to at least 3 epics
+    # OR spread across at least 2 teams.
     high_frag_df = frag_df.loc[
-        (frag_df["Nb_Epics"] >= 2) | (frag_df["Nb_Equipes"] >= 2)
+        (frag_df["Nb_Epics"] >= 3) | (frag_df["Nb_Equipes"] >= 2)
     ].sort_values(
         ["Nb_Epics", "Nb_Equipes", "Score_Fragmentation", "Total_Charge", "Agent"],
         ascending=[False, False, False, False, True],

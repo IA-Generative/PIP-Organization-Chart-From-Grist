@@ -448,7 +448,8 @@ def compute_layout(
 
     if alert_h > 0 and high_fragmentation_box and unassigned_people_box:
         # Place alerts on a dedicated new page.
-        alerts_y = ((int(_max_y) // page_h) + 1) * page_h + 2
+        alert_top_margin = 12
+        alerts_y = ((int(_max_y) // page_h) + 1) * page_h + alert_top_margin
         high_fragmentation_box = Box(
             x=high_fragmentation_box.x,
             y=alerts_y,
