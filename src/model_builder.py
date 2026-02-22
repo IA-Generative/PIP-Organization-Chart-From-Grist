@@ -174,12 +174,15 @@ def build_model(
         affectations["_person_label"] = affectations["_person_id"].map(person_map).fillna("UNKNOWN")
         affectations["_role"] = affectations[aff_role].astype(str)
         affectations["_team_id"] = affectations[aff_team].apply(parse_ref_id)
+        # Team-level actors should exclude zero-load assignments.
+        affectations["_charge_positive"] = affectations[aff_charge] > 0
 
         for tid, grp in affectations.dropna(subset=["_team_id"]).groupby("_team_id"):
-            team_people[int(tid)] = set(grp["_person_label"].tolist())
-            pms = grp.loc[grp["_role"] == pm_role, "_person_label"].unique().tolist()
+            grp_pos = grp.loc[grp["_charge_positive"]]
+            team_people[int(tid)] = set(grp_pos["_person_label"].tolist())
+            pms = grp_pos.loc[grp_pos["_role"] == pm_role, "_person_label"].unique().tolist()
             team_pms[int(tid)] = sorted([p for p in pms if p and p != "UNKNOWN"])
-            pos = grp.loc[grp["_role"] == po_role, "_person_label"].unique().tolist()
+            pos = grp_pos.loc[grp_pos["_role"] == po_role, "_person_label"].unique().tolist()
             team_pos[int(tid)] = sorted([p for p in pos if p and p != "UNKNOWN"])
     else:
         # Empty: create empty sets for listed teams

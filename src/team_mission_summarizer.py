@@ -15,19 +15,47 @@ def _clean(text: str) -> str:
 
 def _build_team_context(team: TeamModel) -> str:
     lines: List[str] = []
+    pm = ", ".join([p for p in team.pm_list if _clean(p)]) or "non renseigne"
+    po = ", ".join([p for p in team.po_list if _clean(p)]) or "non renseigne"
+    members_count = len([p for p in team.people_team if _clean(p) and _clean(p) != "UNKNOWN"])
+    lines.append(f"Equipe: {team.name}")
+    lines.append(f"PM: {pm}")
+    lines.append(f"PO equipe: {po}")
+    lines.append(f"Nb membres equipe: {members_count}")
+
     for epic in team.epics:
         desc = _clean(epic.description)
         int_pi = _clean(epic.intention_pi)
         int_next = _clean(epic.intention_next)
-        if not (desc or int_pi or int_next):
+        feature_list = [_clean(f) for f in epic.features if _clean(f)]
+        assignments = [
+            f"{_clean(a.person)} ({_clean(a.role) or 'role non renseigne'} - {float(a.charge or 0.0):.1f}%)"
+            for a in epic.assignments
+            if _clean(a.person) and _clean(a.person) != "UNKNOWN"
+        ]
+        epic_po = ", ".join([p for p in epic.po_list if _clean(p)]) or "non renseigne"
+        if not (desc or int_pi or int_next or feature_list or assignments):
             continue
         lines.append(f"- Epic: {epic.name}")
+        lines.append(f"  PO epic: {epic_po}")
         if desc:
             lines.append(f"  Description: {desc}")
         if int_pi:
             lines.append(f"  Intention PI: {int_pi}")
         if int_next:
             lines.append(f"  Intention suivante: {int_next}")
+        if feature_list:
+            lines.append("  Features PI:")
+            for feat in feature_list[:12]:
+                lines.append(f"    - {feat}")
+            if len(feature_list) > 12:
+                lines.append(f"    - ... +{len(feature_list) - 12} autres")
+        if assignments:
+            lines.append("  Affectations:")
+            for ass in assignments[:10]:
+                lines.append(f"    - {ass}")
+            if len(assignments) > 10:
+                lines.append(f"    - ... +{len(assignments) - 10} autres")
     return "\n".join(lines)
 
 
@@ -116,12 +144,48 @@ def _summarize_kpis_local(team: TeamModel) -> Tuple[str, str]:
         f"- Charge totale declaree : {round(total_charge, 1)}%",
         f"- Personnes impliquees : {len(people)}",
     ]
-    epic_names = [e.name for e in team.epics if _clean(e.name)]
-    focus = ", ".join(epic_names[:2]) if epic_names else "les epics du portefeuille"
+    epic_names = [_clean(e.name) for e in team.epics if _clean(e.name)]
+    feature_rich = sorted(team.epics, key=lambda e: len(e.features), reverse=True)
+    top_epics = [e for e in feature_rich if _clean(e.name)][:2]
+    focus = ", ".join([_clean(e.name) for e in top_epics]) if top_epics else ", ".join(epic_names[:2])
+    if not focus:
+        focus = "les epics du portefeuille"
+
+    missing_intentions = sum(
+        1 for e in team.epics if not (_clean(e.intention_pi) or _clean(e.intention_next))
+    )
+    epics_without_features = sum(1 for e in team.epics if not e.features)
+    epics_without_assignments = sum(1 for e in team.epics if not e.assignments)
+
+    critique_bits: List[str] = []
+    if missing_intentions:
+        critique_bits.append(
+            f"{missing_intentions}/{nb_epics} epics sans intention explicite"
+        )
+    if epics_without_features:
+        critique_bits.append(
+            f"{epics_without_features}/{nb_epics} epics sans features rattachees"
+        )
+    if epics_without_assignments:
+        critique_bits.append(
+            f"{epics_without_assignments}/{nb_epics} epics sans affectation detaillee"
+        )
+
+    critique = "; ".join(critique_bits) if critique_bits else "contenu globalement structure"
+    next_action = (
+        "definir 2-3 KPI cibles (delai, adoption, qualite) et lier chaque KPI a 1 feature mesurable"
+    )
+    if top_epics and top_epics[0].features:
+        next_action = (
+            f"prioriser les livrables de '{_clean(top_epics[0].name)}' et "
+            "associer chaque feature a un indicateur de resultat"
+        )
+
     suggestion = (
-        f"Suggestion IA: pour {team.name}, prioriser {focus}; "
-        "definir 2-3 KPI cibles (delai, adoption, qualite) "
-        "et rattacher chaque KPI a des Features mesurables."
+        f"Suggestion IA: equipe {team.name}. "
+        f"Contexte prioritaire: {focus}. "
+        f"Point critique: {critique}. "
+        f"Action PO/PM: {next_action}."
     )
     return _clip_lines("\n".join(kpi_lines), 8), _clip_lines(suggestion, 4)
 
@@ -172,6 +236,8 @@ def _llm_summaries(team: TeamModel, context: str) -> Optional[Tuple[str, str, st
         "- obligatoirement contextualisee a l'equipe et aux epics cites\n"
         "- citer explicitement 1 a 3 epics (noms exacts) et au moins 1 element concret "
         "(feature, intention, charge ou role)\n"
+        "- mentionner au moins 1 faiblesse concrete detectee dans le contenu (manque, incoherence ou angle mort)\n"
+        "- interdiction des formulations generiques repetitives (ex: 'definir 2-3 KPI cibles...' sans contexte)\n"
         "- format phrases courtes (pas de markdown, pas de puces numerotees)\n"
         "Repond STRICTEMENT avec:\n"
         "MISSION:\\n...\\nINTENTIONS_MAJEURES:\\n...\\nINDICATEURS_CLES_OKR_KPI:\\n...\\nSUGGESTION_IA:\\n...\n\n"

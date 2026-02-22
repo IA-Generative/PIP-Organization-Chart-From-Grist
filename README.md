@@ -42,6 +42,12 @@ Déposez un fichier `.grist` dans `data/` (exemple fourni : `data/example_empty.
 python -m src.cli full-run --source data/example_empty.grist --pi PI-10
 ```
 
+Pour les jeux de données réels/sensibles, utilisez plutôt un dossier non versionné (ex: `local-no-upload/`) :
+
+```zsh
+python -m src.cli full-run --source "local-no-upload/🏗️Gestion PI SDID (15).grist" --pi PI-6
+```
+
 ### 2) Mode API Grist (optionnel)
 Configurer les variables :
 
@@ -91,6 +97,15 @@ Dans `output/` :
 - **PM** : affichés au niveau **Équipe** (container).
 - **PO** : affichés sur les **Epics séparées**.
 - **Epic séparée** : si les personnes affectées à l’Epic ne sont pas un sous-ensemble des personnes de l’équipe (`people_epic ⊄ people_team`).
+
+### Règles Draw.io (actuelles)
+
+- Bloc **Affecté sur plusieurs EPICS** : personne affichée si `Nb_Epics >= 3` ou `Nb_Equipes >= 2`.
+- Bloc **Affecté sur plusieurs EPICS** : chaque ligne inclut le nombre d’EPICs de la personne (`[n EPICS]`).
+- Bloc **Sans affectation ou total < 25%** : inclut les personnes sans affectation et celles dont la charge totale est `< 25%`.
+- Blocs **Équipe** (PM/PO/Membres) : les acteurs avec charge `= 0` ne sont pas affichés.
+- Lignes d’affectation dans les blocs EPIC : les charges `< 10%` sont rendues en gris sombre.
+- **Epics séparées** : ajout d’un sous-titre bleu **Intention prochain PI** avec un résumé description+intentions (moins de 5 lignes).
 
 ## Commandes
 

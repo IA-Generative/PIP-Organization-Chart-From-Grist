@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -82,7 +83,44 @@ def _sorted_members(members: set[str]) -> List[str]:
     return sorted([m for m in members if m and m != "UNKNOWN"])
 
 
-def _epic_height(epic: EpicModel, team: TeamModel | None = None, max_chars: int = 52) -> int:
+def _split_sentences(text: str) -> List[str]:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[\.\!\?\;\:])\s+", cleaned)
+    return [p.strip(" -") for p in parts if p.strip(" -")]
+
+
+def _epic_intention_summary_lines(epic: EpicModel, max_lines: int = 4, max_chars: int = 105) -> List[str]:
+    src = " ".join(
+        p.strip()
+        for p in [epic.description or "", epic.intention_pi or "", epic.intention_next or ""]
+        if (p or "").strip()
+    )
+    if not src:
+        return ["Aucune description/intention renseignee."]
+
+    sentences = _split_sentences(src) or [src]
+    out: List[str] = []
+    seen = set()
+    for s in sentences:
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        line = s if len(s) <= max_chars else s[: max_chars - 3].rstrip() + "..."
+        out.append(line)
+        if len(out) >= max_lines:
+            break
+    return out[:max_lines]
+
+
+def _epic_height(
+    epic: EpicModel,
+    team: TeamModel | None = None,
+    max_chars: int = 52,
+    include_intention_summary: bool = False,
+) -> int:
     lines: List[str] = [epic.name]
     if team is not None:
         lines.append(f"Equipe : {team.name}")
@@ -110,6 +148,10 @@ def _epic_height(epic: EpicModel, team: TeamModel | None = None, max_chars: int 
         lines.append("Features (PI) :")
         for f in epic.features:
             lines.append(f"- {f}")
+    if include_intention_summary:
+        lines.append("")
+        lines.append("Intention prochain PI")
+        lines.extend(_epic_intention_summary_lines(epic))
 
     wrapped = _wrapped_lines(lines, max_chars=max_chars)
     base_bottom = 16 if not has_details else 24
@@ -223,14 +265,14 @@ def _build_layout_for_columns(
         sx = margin + col_idx * (col_w + col_gap)
         cursor_y = col_heights[col_idx]
 
-        def _page_top(y: int) -> int:
-            return y_start + ((max(y, y_start) - y_start) // page_h) * page_h
-
-        def _page_bottom(y: int) -> int:
-            return _page_top(y) + page_h - page_bottom_margin
-
         def _abs_page_top(y: int) -> int:
             return (max(int(y), 0) // page_h) * page_h
+
+        def _page_top(y: int) -> int:
+            return _abs_page_top(y)
+
+        def _page_bottom(y: int) -> int:
+            return _abs_page_top(y) + page_h - page_bottom_margin
 
         def _snap_theme_start(y: int) -> int:
             """
@@ -238,7 +280,7 @@ def _build_layout_for_columns(
             If y is inside a later page body, push to next page top.
             """
             pt = _page_top(y)
-            if pt == y_start:
+            if pt == 0:
                 return y
             return pt if y == pt else (pt + page_h)
 
@@ -270,7 +312,7 @@ def _build_layout_for_columns(
         moved_to_new_page_for_header = False
 
         need_space = theme_header_h + default_header_gap + (first_team_h or 0)
-        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y) and _page_top(cursor_y) != y_start:
+        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y) and _page_top(cursor_y) != 0:
             cursor_y = _page_top(cursor_y) + page_h
             moved_to_new_page_for_header = True
         snapped_cursor_y = _snap_theme_start(cursor_y)
@@ -282,77 +324,100 @@ def _build_layout_for_columns(
         if moved_to_new_page_for_header and cursor_y >= page_h:
             cursor_y = _abs_page_top(cursor_y) + 2
         theme_header_boxes.append((theme, Box(sx, cursor_y, col_w, theme_header_h)))
-        is_later_page = _page_top(cursor_y) != y_start
+        is_later_page = _page_top(cursor_y) != 0
         header_gap = jump_header_gap if (moved_to_new_page_for_header or is_later_page) else default_header_gap
         cursor_y += theme_header_h + header_gap
+        theme_floor_y = cursor_y
 
         if not teams_in_theme:
             cursor_y += 40
 
+        work_col_heights = col_heights[:]
+        work_col_heights[col_idx] = cursor_y
+        touched_cols = {col_idx}
+
         pending = list(teams_in_theme)
         while pending:
-            remaining = _page_bottom(cursor_y) - cursor_y
-            fit = [t for t in pending if team_dims[t.id][5] <= remaining]
-            # Best-fit: choose the tallest team that fits remaining page space.
-            # This reduces local holes without breaking thematic grouping.
-            if fit:
-                team = max(fit, key=lambda t: team_dims[t.id][5])
+            # Best-fit across all columns: fill existing holes on the current page
+            # before forcing a page break.
+            fit_candidates: List[Tuple[int, int, int, TeamModel, int]] = []
+            for team in pending:
+                team_h = team_dims[team.id][5]
+                for i in range(cols):
+                    y = max(work_col_heights[i], theme_floor_y)
+                    remaining = _page_bottom(y) - y
+                    if team_h <= remaining:
+                        leftover = remaining - team_h
+                        # min leftover first, then larger blocks.
+                        fit_candidates.append((leftover, -team_h, y, team, i))
+
+            chosen_team: TeamModel
+            chosen_col_idx: int
+            chosen_y: int
+            fresh_page_capacity = page_h - page_bottom_margin - 2
+            overflow_tolerance_px = 2
+
+            if fit_candidates:
+                # Prefer higher placement first (smaller y), then tighter fill.
+                _, _, chosen_y, chosen_team, chosen_col_idx = min(
+                    fit_candidates,
+                    key=lambda x: (x[2], x[0], x[1]),
+                )
             else:
-                # Nothing fits: pick the smallest to minimize immediate overflow.
-                team = min(pending, key=lambda t: team_dims[t.id][5])
+                spill_candidates: List[Tuple[int, int, int, TeamModel, int]] = []
+                for team in pending:
+                    team_h = team_dims[team.id][5]
+                    for i in range(cols):
+                        y = max(work_col_heights[i], theme_floor_y)
+                        overflow = max(0, y + team_h - _page_bottom(y))
+                        # min overflow first, then larger blocks.
+                        spill_candidates.append((overflow, -team_h, y, team, i))
+                _, _, chosen_y, chosen_team, chosen_col_idx = min(
+                    spill_candidates,
+                    key=lambda x: (x[0], x[2], x[1]),
+                )
+                team_h = team_dims[chosen_team.id][5]
+                if max(0, chosen_y + team_h - _page_bottom(chosen_y)) > overflow_tolerance_px and team_h <= fresh_page_capacity:
+                    chosen_y = _page_top(chosen_y) + page_h
 
-            info_h, mission_h, kpi_h, warning_h, epic_heights, team_h = team_dims[team.id]
+            info_h, mission_h, kpi_h, warning_h, epic_heights, team_h = team_dims[chosen_team.id]
+            sx_for_team = margin + chosen_col_idx * (col_w + col_gap)
 
-            # If team block doesn't fit in current page, move to next page when relevant.
-            fresh_page_capacity = page_h - page_bottom_margin - (theme_header_h + 8)
-            is_first_page = _page_top(cursor_y) == y_start
-            page_bottom = _page_bottom(cursor_y)
-            overflow_current = max(0, cursor_y + team_h - page_bottom)
-            # Generic pagination rule:
-            # move to next page only for blocks that can fit on a fresh page.
-            # Oversized blocks stay in flow to avoid artificial white gaps after page breaks.
-            should_move = (
-                overflow_current > 0
-                and not is_first_page
-                and team_h <= fresh_page_capacity
-            )
-            if should_move:
-                cursor_y = _page_top(cursor_y) + page_h
-                # Do not repeat thematic headers on page breaks.
-
-            team_boxes[team.id] = Box(sx, cursor_y, team_w, team_h)
-            team_info_boxes[team.id] = Box(sx + 15, cursor_y + team_header_h + 10, epic_w, info_h)
-            team_mission_boxes[team.id] = Box(
-                sx + 15,
-                cursor_y + team_header_h + 10 + info_h + 12,
+            team_boxes[chosen_team.id] = Box(sx_for_team, chosen_y, team_w, team_h)
+            team_info_boxes[chosen_team.id] = Box(sx_for_team + 15, chosen_y + team_header_h + 10, epic_w, info_h)
+            team_mission_boxes[chosen_team.id] = Box(
+                sx_for_team + 15,
+                chosen_y + team_header_h + 10 + info_h + 12,
                 epic_w,
                 mission_h,
             )
-            team_kpi_boxes[team.id] = Box(
-                sx + 15,
-                cursor_y + team_header_h + 10 + info_h + 12 + mission_h + 10,
+            team_kpi_boxes[chosen_team.id] = Box(
+                sx_for_team + 15,
+                chosen_y + team_header_h + 10 + info_h + 12 + mission_h + 10,
                 epic_w,
                 kpi_h,
             )
             if warning_h > 0:
-                team_warning_boxes[team.id] = Box(
-                    sx + 15,
-                    cursor_y + team_header_h + 10 + info_h + 12 + mission_h + 10 + kpi_h + 10,
+                team_warning_boxes[chosen_team.id] = Box(
+                    sx_for_team + 15,
+                    chosen_y + team_header_h + 10 + info_h + 12 + mission_h + 10 + kpi_h + 10,
                     epic_w,
                     warning_h,
                 )
 
-            ey = cursor_y + team_header_h + 10 + info_h + 12 + mission_h + 12 + kpi_h + 10
+            ey = chosen_y + team_header_h + 10 + info_h + 12 + mission_h + 12 + kpi_h + 10
             if warning_h > 0:
                 ey += warning_h + 10
-            for e, eh in zip(team.epics, epic_heights):
-                epic_boxes[(team.id, e.id)] = Box(sx + 15, ey, epic_w, eh)
+            for e, eh in zip(chosen_team.epics, epic_heights):
+                epic_boxes[(chosen_team.id, e.id)] = Box(sx_for_team + 15, ey, epic_w, eh)
                 ey += eh + row_gap
 
-            cursor_y += team_h + team_gap_y
-            pending.remove(team)
+            work_col_heights[chosen_col_idx] = chosen_y + team_h + team_gap_y
+            touched_cols.add(chosen_col_idx)
+            pending.remove(chosen_team)
 
-        col_heights[col_idx] = cursor_y + section_gap_y
+        for i in touched_cols:
+            col_heights[i] = work_col_heights[i] + section_gap_y
 
     # Separate epics: keep them on same page by distributing cards on columns.
     if model.separate_epics:
@@ -364,7 +429,7 @@ def _build_layout_for_columns(
         sep_chars = max(34, int((col_w - 30) / 8))
 
         def _sep_page_top(y: int) -> int:
-            return y_start + ((max(y, y_start) - y_start) // page_h) * page_h
+            return (max(int(y), 0) // page_h) * page_h
 
         def _sep_page_bottom(y: int) -> int:
             return _sep_page_top(y) + page_h - page_bottom_margin
@@ -373,7 +438,7 @@ def _build_layout_for_columns(
             col_idx = min(range(cols), key=lambda i: sep_col_heights[i])
             sx = margin + col_idx * (col_w + col_gap)
             sy = sep_col_heights[col_idx]
-            eh = _epic_height(e, max_chars=sep_chars) + 10
+            eh = _epic_height(e, max_chars=sep_chars, include_intention_summary=True) + 10
             if sy + eh > _sep_page_bottom(sy):
                 sy = _sep_page_top(sy) + page_h
             separate_epic_boxes[e.id] = Box(sx, sy, col_w, eh)

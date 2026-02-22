@@ -122,6 +122,11 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
     high_fragmented_names = [
         str(x).strip() for x in high_frag_df["Agent"].tolist() if str(x).strip() and str(x) != "UNKNOWN"
     ]
+    epic_count_map = {
+        str(r["Agent"]).strip(): int(r["Nb_Epics"])
+        for _, r in high_frag_df.iterrows()
+        if str(r.get("Agent", "")).strip() and str(r.get("Agent", "")).strip() != "UNKNOWN"
+    }
 
     person_map = dict(zip(data.personnes["id"], data.personnes[person_label_col].astype(str)))
     epic_name_map = {}
@@ -162,11 +167,13 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
 
     high_fragmented: List[str] = []
     for person in list(dict.fromkeys(high_fragmented_names)):
+        nb_epics = int(epic_count_map.get(person, 0))
+        epic_count_label = f"{nb_epics} EPIC{'s' if nb_epics > 1 else ''}"
         epics = sorted(person_epics.get(person, set()))
         if epics:
-            high_fragmented.append(f"{person} ({', '.join(epics)})")
+            high_fragmented.append(f"{person} [{epic_count_label}] ({', '.join(epics)})")
         else:
-            high_fragmented.append(f"{person} (multi-équipes)")
+            high_fragmented.append(f"{person} [{epic_count_label}] (multi-équipes)")
 
     return high_fragmented, low_or_unassigned
 

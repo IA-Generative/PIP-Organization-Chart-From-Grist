@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 import xml.etree.ElementTree as ET
 from typing import List, Optional
 
@@ -36,6 +37,44 @@ def _format_charge_percent(charge: float) -> str:
 
 def _sorted_members(members: set[str]) -> List[str]:
     return sorted([m for m in members if m and m != "UNKNOWN"])
+
+
+def _split_sentences(text: str) -> List[str]:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[\.\!\?\;\:])\s+", cleaned)
+    return [p.strip(" -") for p in parts if p.strip(" -")]
+
+
+def _summarize_epic_intention(epic: EpicModel, max_lines: int = 4, max_chars: int = 105) -> str:
+    src = " ".join(
+        p.strip()
+        for p in [epic.description or "", epic.intention_pi or "", epic.intention_next or ""]
+        if (p or "").strip()
+    )
+    if not src:
+        return "Aucune description/intention renseignee."
+
+    sentences = _split_sentences(src)
+    if not sentences:
+        sentences = [src]
+
+    out: List[str] = []
+    seen = set()
+    for s in sentences:
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        line = s
+        if len(line) > max_chars:
+            line = line[: max_chars - 3].rstrip() + "..."
+        out.append(line)
+        if len(out) >= max_lines:
+            break
+
+    return "\n".join(out[:max_lines])
 
 
 def _format_team_info_value(team: TeamModel, max_members_display: int = 12) -> str:
@@ -265,7 +304,7 @@ def build_drawio(
     for epic in model.separate_epics:
         eb = layout.separate_epic_boxes[epic.id]
         po = ", ".join(epic.po_list) if epic.po_list else "—"
-        epic_value = _format_epic_value(epic, show_po=True, po=po)
+        epic_value = _format_epic_value(epic, show_po=True, po=po, include_intention_summary=True)
         ecell = _mx_cell(root, id=str(next_id), value=epic_value, style=epic_sep_style, vertex="1", parent="1")
         _mx_geometry(ecell, eb.x, eb.y, eb.w, eb.h)
         next_id += 1
@@ -284,6 +323,7 @@ def _format_epic_value(
     team_name: Optional[str] = None,
     team_po_list: Optional[List[str]] = None,
     team_members: Optional[List[str]] = None,
+    include_intention_summary: bool = False,
 ) -> str:
     lines = [f"<div style=\"text-align:center;\"><b>🧩 {_html_escape(epic.name)}</b></div>"]
     if team_name:
@@ -302,9 +342,10 @@ def _format_epic_value(
         for a in epic.assignments:
             person = (a.person or "").strip() or "—"
             role = (a.role or "").strip() or "—"
-            lines.append(
-                f"{_html_escape(person)} – {_html_escape(role)} – {_format_charge_percent(a.charge)}"
-            )
+            assignment_line = f"{_html_escape(person)} – {_html_escape(role)} – {_format_charge_percent(a.charge)}"
+            if float(a.charge or 0.0) < 10.0:
+                assignment_line = f'<span style="color:#555555;">{assignment_line}</span>'
+            lines.append(assignment_line)
     else:
         lines.append("(aucune affectation specifique)")
     if epic.features:
@@ -312,4 +353,9 @@ def _format_epic_value(
         lines.append("✨ Features (PI) :")
         for f in epic.features:
             lines.append(f"✨ {_html_escape(f)}")
+    if include_intention_summary:
+        summary = _summarize_epic_intention(epic)
+        lines.append("")
+        lines.append('<div style="text-align:center;color:#1f4e79;"><b>Intention prochain PI</b></div>')
+        lines.append(_html_escape(summary).replace("\n", "<br/>"))
     return "<br/>".join(lines)
