@@ -38,7 +38,8 @@ EPIC_HEADER_AMBITION_PREFIX = "[EPIC_HEADER_AMBITION]"
 EPIC_HEADER_FEATURES_PREFIX = "[EPIC_HEADER_FEATURES]"
 DARK_RED_HEX = "8B0000"
 DARK_BLUE_HEX = "0070C0"
-FINALITES_PAGE_MAX_LINES = 10
+FINALITES_PAGE_MAX_LINES = 6
+AMBITION_PAGE_MAX_LINES = 6
 
 
 class _TerminalSpinner:
@@ -291,10 +292,14 @@ def _collect_ppt_rewrite_jobs(model: BuiltModel, frag_df) -> List[Tuple[str, str
             f"Epics sans feature PI: {epic_without_features}",
             "Dependances majeures: a completer selon contexte",
         ])
-        for page_idx, page in enumerate(_finalites_pages_for_team(team), start=1):
-            add_lines("Finalites", page)
-            if page_idx == 1:
-                add_lines("Ambition du PIP", _ambitions_for_team(team))
+        final_pages = _finalites_pages_for_team(team)
+        ambition_pages = _ambitions_pages_for_team(team)
+        page_total = max(len(final_pages), len(ambition_pages))
+        for page_idx in range(page_total):
+            final_lines = final_pages[page_idx] if page_idx < len(final_pages) else []
+            ambition_lines = ambition_pages[page_idx] if page_idx < len(ambition_pages) else []
+            add_lines("Finalites", final_lines)
+            add_lines("Ambition du PIP", ambition_lines)
         add_lines("Backlog features PI", _features_for_team(team)[:18])
 
     return jobs
@@ -857,6 +862,32 @@ def _pick_content_shape(slide, *, keyword: str, index: int, x: float, y: float, 
     return _get_or_add_content_shape(slide, index, x, y, w, h)
 
 
+def _pick_distinct_content_shape(slide, *, exclude_shape_id: int, index: int, x: float, y: float, w: float, h: float):
+    text_shapes = [s for s in _content_text_shapes(slide) if s.shape_id != exclude_shape_id]
+    if text_shapes:
+        target_left = int(Inches(x))
+        target_top = int(Inches(y))
+        target_width = int(Inches(w))
+        target_height = int(Inches(h))
+
+        def _shape_score(shape) -> int:
+            return (
+                abs(int(shape.left) - target_left)
+                + abs(int(shape.top) - target_top)
+                + abs(int(shape.width) - target_width)
+                + abs(int(shape.height) - target_height)
+            )
+
+        if index < len(text_shapes):
+            indexed_shape = text_shapes[index]
+            best_shape = min(text_shapes, key=_shape_score)
+            if _shape_score(best_shape) <= _shape_score(indexed_shape):
+                return best_shape
+            return indexed_shape
+        return min(text_shapes, key=_shape_score)
+    return slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+
+
 def _layout_by_name(prs: Presentation, name: str):
     for i in range(len(prs.slide_layouts)):
         if prs.slide_layouts[i].name == name:
@@ -1053,16 +1084,9 @@ def _finalites_for_team(team: TeamModel) -> List[str]:
     return rows or ["Aucune finalite renseignee."]
 
 
-def _finalites_pages_for_team(team: TeamModel, max_lines: int = FINALITES_PAGE_MAX_LINES) -> List[List[str]]:
-    sections: List[List[str]] = []
-    for epic in team.epics:
-        section: List[str] = [f"{EPIC_HEADER_LINE_PREFIX}{epic.name}:"]
-        desc = epic.description.strip() if epic.description else "sans description"
-        section.extend(_split_long_text(desc, max_len=105))
-        sections.append(section)
-
+def _paginate_section_rows(sections: List[List[str]], max_lines: int) -> List[List[str]]:
     if not sections:
-        return [["Aucune finalite renseignee."]]
+        return [[]]
 
     pages: List[List[str]] = []
     current: List[str] = []
@@ -1075,7 +1099,6 @@ def _finalites_pages_for_team(team: TeamModel, max_lines: int = FINALITES_PAGE_M
             current_count = 0
 
         if sec_count > max_lines:
-            # Very large section: split but keep header at the start of each chunk.
             header = section[0]
             body = section[1:]
             chunk: List[str] = [header]
@@ -1098,7 +1121,20 @@ def _finalites_pages_for_team(team: TeamModel, max_lines: int = FINALITES_PAGE_M
 
     if current:
         pages.append(current)
-    return pages
+    return pages or [[]]
+
+
+def _finalites_pages_for_team(team: TeamModel, max_lines: int = FINALITES_PAGE_MAX_LINES) -> List[List[str]]:
+    sections: List[List[str]] = []
+    for epic in team.epics:
+        section: List[str] = [f"{EPIC_HEADER_LINE_PREFIX}{epic.name}:"]
+        desc = epic.description.strip() if epic.description else "sans description"
+        section.extend(_split_long_text(desc, max_len=105))
+        sections.append(section)
+
+    if not sections:
+        return [["Aucune finalite renseignee."]]
+    return _paginate_section_rows(sections, max_lines)
 
 
 def _ambitions_for_team(team: TeamModel) -> List[str]:
@@ -1108,6 +1144,18 @@ def _ambitions_for_team(team: TeamModel) -> List[str]:
         rows.append(f"{EPIC_HEADER_AMBITION_PREFIX}{epic.name}:")
         rows.extend(_split_long_text(ambition, max_len=105))
     return rows or ["Aucune ambition PI renseignee."]
+
+
+def _ambitions_pages_for_team(team: TeamModel, max_lines: int = AMBITION_PAGE_MAX_LINES) -> List[List[str]]:
+    sections: List[List[str]] = []
+    for epic in team.epics:
+        section: List[str] = [f"{EPIC_HEADER_AMBITION_PREFIX}{epic.name}:"]
+        ambition = _epic_ambition(epic)
+        section.extend(_split_long_text(ambition, max_len=105))
+        sections.append(section)
+    if not sections:
+        return [["Aucune ambition PI renseignee."]]
+    return _paginate_section_rows(sections, max_lines)
 
 
 def _ensure_base_slides(prs: Presentation) -> None:
@@ -1262,21 +1310,45 @@ def _fill_team_slide(s_team, team: TeamModel) -> None:
         team=team,
     )
 
-def _fill_finalites_ambition_slide(s_ambition, team: TeamModel, finalites_lines: List[str], page_index: int, page_total: int) -> None:
+def _fill_finalites_ambition_slide(
+    s_ambition,
+    team: TeamModel,
+    finalites_lines: List[str],
+    ambitions_lines: List[str],
+    page_index: int,
+    page_total: int,
+) -> None:
     suffix = f" ({page_index}/{page_total})" if page_total > 1 else ""
     _write_title(s_ambition, f"Finalites et ambition du PIP - {team.name}{suffix}")
     a1 = _pick_content_shape(s_ambition, keyword="finalit", index=0, x=0.8, y=1.4, w=12.2, h=2.4)
-    if not _llm_enabled():
-        finalites_lines = finalites_lines[:8]
-    _write_block(a1, "Finalites", finalites_lines)
+    finalites_non_empty = any(_normalize_line_text(x) for x in finalites_lines)
 
     a2 = _pick_content_shape(s_ambition, keyword="ambition", index=1, x=0.8, y=4.0, w=12.2, h=2.4)
-    ambitions_lines: List[str] = []
-    if page_index == 1:
-        ambitions_lines = _ambitions_for_team(team)
-        if not _llm_enabled():
-            ambitions_lines = ambitions_lines[:8]
-    _write_block(a2, "Ambition du PIP", ambitions_lines)
+    if a2.shape_id == a1.shape_id:
+        a2 = _pick_distinct_content_shape(
+            s_ambition,
+            exclude_shape_id=a1.shape_id,
+            index=0,
+            x=0.8,
+            y=4.0,
+            w=12.2,
+            h=2.4,
+        )
+    ambitions_non_empty = any(_normalize_line_text(x) for x in ambitions_lines)
+    if finalites_non_empty:
+        _write_block(a1, "Finalites", finalites_lines)
+        if ambitions_non_empty:
+            _write_block(a2, "Ambition du PIP", ambitions_lines)
+        elif a2.has_text_frame:
+            a2.text_frame.clear()
+    else:
+        # No finalites on this page: promote ambition to the top block.
+        if ambitions_non_empty:
+            _write_block(a1, "Ambition du PIP", ambitions_lines)
+        elif a1.has_text_frame:
+            a1.text_frame.clear()
+        if a2.has_text_frame:
+            a2.text_frame.clear()
 
 def _fill_features_slide(s_features, team: TeamModel) -> None:
     _write_title(s_features, f"Features - {team.name}")
@@ -1328,32 +1400,37 @@ def generate_ppt(model: BuiltModel, frag_kpis: Dict[str, int], out_path: str, fr
         first_team = model.teams[0]
         _fill_team_slide(prs.slides[4], first_team)
 
-        first_pages = _finalites_pages_for_team(first_team)
+        first_final_pages = _finalites_pages_for_team(first_team)
+        first_ambition_pages = _ambitions_pages_for_team(first_team)
+        first_total_pages = max(len(first_final_pages), len(first_ambition_pages))
         _fill_finalites_ambition_slide(
             prs.slides[5],
             first_team,
-            first_pages[0],
+            first_final_pages[0] if first_final_pages else [],
+            first_ambition_pages[0] if first_ambition_pages else [],
             page_index=1,
-            page_total=len(first_pages),
+            page_total=first_total_pages,
         )
-        if len(first_pages) == 1:
+        if first_total_pages == 1:
             _fill_features_slide(prs.slides[6], first_team)
         else:
             _fill_finalites_ambition_slide(
                 prs.slides[6],
                 first_team,
-                first_pages[1],
+                first_final_pages[1] if len(first_final_pages) > 1 else [],
+                first_ambition_pages[1] if len(first_ambition_pages) > 1 else [],
                 page_index=2,
-                page_total=len(first_pages),
+                page_total=first_total_pages,
             )
-            for idx in range(2, len(first_pages)):
+            for idx in range(2, first_total_pages):
                 s_more = prs.slides.add_slide(title_only_layout)
                 _fill_finalites_ambition_slide(
                     s_more,
                     first_team,
-                    first_pages[idx],
+                    first_final_pages[idx] if idx < len(first_final_pages) else [],
+                    first_ambition_pages[idx] if idx < len(first_ambition_pages) else [],
                     page_index=idx + 1,
-                    page_total=len(first_pages),
+                    page_total=first_total_pages,
                 )
             s_features_first = prs.slides.add_slide(title_only_layout)
             _fill_features_slide(s_features_first, first_team)
@@ -1362,15 +1439,18 @@ def generate_ppt(model: BuiltModel, frag_kpis: Dict[str, int], out_path: str, fr
             s_team = prs.slides.add_slide(title_only_layout)
             _fill_team_slide(s_team, team)
 
-            pages = _finalites_pages_for_team(team)
-            for idx, page_lines in enumerate(pages, start=1):
+            final_pages = _finalites_pages_for_team(team)
+            ambition_pages = _ambitions_pages_for_team(team)
+            page_total = max(len(final_pages), len(ambition_pages))
+            for idx in range(page_total):
                 s_ambition = prs.slides.add_slide(title_only_layout)
                 _fill_finalites_ambition_slide(
                     s_ambition,
                     team,
-                    page_lines,
-                    page_index=idx,
-                    page_total=len(pages),
+                    final_pages[idx] if idx < len(final_pages) else [],
+                    ambition_pages[idx] if idx < len(ambition_pages) else [],
+                    page_index=idx + 1,
+                    page_total=page_total,
                 )
 
             s_features = prs.slides.add_slide(title_only_layout)

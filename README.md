@@ -128,10 +128,13 @@ Dans `output/` :
   - Planche 2 : vue d’ensemble PI (infos + stats + population d’agents)
   - Planche 3 : agents avec fragmentation d’affectation
   - Planche 4 : agents avec faible affectation (`<10%`)
-  - Puis, par équipe, un groupe de 3 planches :
+  - Puis, par équipe :
     - Équipe
-    - Finalités et ambition du PIP
+    - Finalités et ambition du PIP (découpage automatique en `x/total` si texte long)
     - Features
+- Le nombre de planches par équipe est donc **dynamique** :
+  - si le contenu Finalités/Ambition est long, des planches supplémentaires sont créées.
+  - sur les planches suivantes, si `Finalités` est vide, le bloc `Ambition du PIP` est remonté en haut.
 - La planche **Équipe** inclut un tableau : `Membre | Qualité | Affectation %` (lignes à `0.0%` filtrées).
 - La planche **Fragmentation** inclut un tableau : `Agent | Equipes | Epics | Affect. | Charge % | Score`.
 - Mise en forme appliquée par le générateur :
@@ -140,6 +143,7 @@ Dans `output/` :
   - ajustement automatique du texte à la zone (`text-to-fit`)
   - limitation des indentations pour exploiter toute la largeur des blocs du template
   - titres de planches en capitales
+- En fin de génération `ppt` / `full-run`, le fichier `.pptx` est ouvert automatiquement si une application compatible est disponible.
 
 ## Logique métier
 
@@ -163,6 +167,9 @@ Dans `output/` :
 - Analyse seule : `analyze`
 - PPT seul : `ppt` (`--source` ou `--api`)
 - Le flag `--llm` est disponible sur `full-run`, `diagram` et `ppt`.
+- Variables utiles de parallélisme LLM :
+  - `LLM_SYNTH_MAX_WORKERS` (synthèse équipe pour Draw.io/PPT, défaut `32`, plafond `256`)
+  - `LLM_PPT_MAX_WORKERS` (reformulation PPT, défaut `16`, plafond `256`)
 
 ## Statut LLM
 
@@ -170,6 +177,8 @@ Dans `output/` :
   - `🤖 LLM Synthèse/Draw.io: actif|inactif (...)`
   - `🤖 LLM PPT: actif|inactif (...)`
 - Sans `--llm`, les appels LLM sont désactivés (`fallback` local).
+- Le mode de logs se règle avec `--llm-log` (`quiet|compact|verbose`).
+- Pour diagnostiquer finement les réponses LLM, activer ponctuellement `LLM_DEBUG=1`.
 
 Voir `python -m src.cli --help`.
 
