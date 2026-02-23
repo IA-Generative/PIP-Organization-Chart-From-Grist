@@ -55,6 +55,11 @@ def _clean(s: str) -> str:
     return (s or "").strip()
 
 
+def _target_intention(epic: EpicModel) -> str:
+    # Excel analysis is based on next increment intention first.
+    return _clean(epic.intention_next) or _clean(epic.intention_pi)
+
+
 def _norm_tokens(text: str) -> set[str]:
     return set(
         w
@@ -137,7 +142,7 @@ def _parse_json_payload(raw: str) -> dict | None:
 def _fallback_analysis(entry: EpicEntry) -> EpicAnalysis:
     epic = entry.epic
     desc = _clean(epic.description)
-    intention = _clean(epic.intention_pi) or _clean(epic.intention_next)
+    intention = _target_intention(epic)
     features = [_clean(f) for f in epic.features if _clean(f)]
     base_text = desc or intention or epic.name
     impact_lines: List[str] = []
@@ -201,7 +206,7 @@ def _llm_analysis(entry: EpicEntry) -> EpicAnalysis | None:
     model = os.getenv("EXCEL_LLM_MODEL", DEFAULT_EXCEL_MODEL)
 
     description = _clean(epic.description)
-    intention = _clean(epic.intention_pi) or _clean(epic.intention_next)
+    intention = _target_intention(epic)
     features = [_clean(f) for f in epic.features if _clean(f)]
     features_block = "\n".join([f"- {f}" for f in features[:25]]) if features else "- aucune feature PI"
 
@@ -387,7 +392,7 @@ def generate_epics_excel(model: BuiltModel, out_path: str) -> None:
         "Epic_ID",
         "Epic_Titre",
         "Description_Originale",
-        "Intention_Originale",
+        "Intention_Prochain_Increment_Originale",
         "Synthese_Courte",
         "Intention_Courte",
         "Couverture_Features",
@@ -414,7 +419,7 @@ def generate_epics_excel(model: BuiltModel, out_path: str) -> None:
     for entry in entries:
         epic = entry.epic
         analysis = analyses.get(epic.id) or _fallback_analysis(entry)
-        original_intention = _clean(epic.intention_pi) or _clean(epic.intention_next)
+        original_intention = _target_intention(epic)
         features_text = "\n".join([f"- {f}" for f in epic.features]) if epic.features else ""
         ws1.append(
             [

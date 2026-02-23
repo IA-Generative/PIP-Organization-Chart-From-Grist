@@ -83,6 +83,19 @@ def _sorted_members(members: set[str]) -> List[str]:
     return sorted([m for m in members if m and m != "UNKNOWN"])
 
 
+def _sorted_epic_assignment_members(epic: EpicModel) -> List[str]:
+    members = {
+        (a.person or "").strip()
+        for a in epic.assignments
+        if (a.role or "").strip().upper() not in {"PM", "PO"}
+    }
+    return sorted([m for m in members if m and m != "UNKNOWN"])
+
+
+def _is_management_role(role: str) -> bool:
+    return (role or "").strip().upper() in {"PM", "PO"}
+
+
 def _split_sentences(text: str) -> List[str]:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
     if not cleaned:
@@ -121,24 +134,25 @@ def _epic_height(
     max_chars: int = 52,
     include_intention_summary: bool = False,
 ) -> int:
+    display_assignments = [a for a in epic.assignments if not _is_management_role(a.role)]
     lines: List[str] = [epic.name]
     if team is not None:
         lines.append(f"Equipe : {team.name}")
         # Keep height estimation aligned with rendered content:
-        # PO/Membres/PO epic are shown only when there are explicit assignments.
-        if epic.assignments:
+        # PO team + epic members + PO epic are shown only with explicit assignments.
+        if display_assignments:
             lines.append(f"PO equipe : {', '.join(team.po_list) if team.po_list else '—'}")
-            team_members = _sorted_members(team.people_team)
-            members_text = ", ".join(team_members) if team_members else "—"
-            lines.append(f"Membres equipe : {members_text}")
-    if epic.assignments:
+            epic_members = _sorted_epic_assignment_members(epic)
+            members_text = ", ".join(epic_members) if epic_members else "—"
+            lines.append(f"Membres epic : {members_text}")
+    if display_assignments:
         lines.append(f"PO epic : {', '.join(epic.po_list) if epic.po_list else '—'}")
-    has_details = bool(epic.assignments or epic.features)
+    has_details = bool(display_assignments or epic.features)
     if has_details:
         lines.append("—")
 
-    if epic.assignments:
-        for a in epic.assignments:
+    if display_assignments:
+        for a in display_assignments:
             lines.append(f"{a.person} - {a.role} - {int(round(a.charge))}%")
     else:
         lines.append("(aucune affectation specifique)")
@@ -255,6 +269,9 @@ def _build_layout_for_columns(
     section_gap_y = 24
     team_gap_y = 28
     page_h = 1169
+    # Keep a thin printable gutter between pages in draw.io exports.
+    page_gap = 24
+    page_step = page_h + page_gap
     page_bottom_margin = 24
 
     col_heights = [y_start for _ in range(cols)]
@@ -266,7 +283,7 @@ def _build_layout_for_columns(
         cursor_y = col_heights[col_idx]
 
         def _abs_page_top(y: int) -> int:
-            return (max(int(y), 0) // page_h) * page_h
+            return (max(int(y), 0) // page_step) * page_step
 
         def _page_top(y: int) -> int:
             return _abs_page_top(y)
@@ -312,8 +329,10 @@ def _build_layout_for_columns(
         moved_to_new_page_for_header = False
 
         need_space = theme_header_h + default_header_gap + (first_team_h or 0)
-        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y) and _page_top(cursor_y) != 0:
-            cursor_y = _page_top(cursor_y) + page_h
+        # Keep thematic header and first team on the same page when there is not
+        # enough remaining space, including on the first page.
+        if cursor_y + max(theme_header_h, need_space) > _page_bottom(cursor_y):
+            cursor_y = _page_top(cursor_y) + page_step
             moved_to_new_page_for_header = True
         snapped_cursor_y = _snap_theme_start(cursor_y)
         if snapped_cursor_y != cursor_y:
@@ -321,7 +340,7 @@ def _build_layout_for_columns(
             cursor_y = snapped_cursor_y
         # If a header is explicitly moved to a new page, align it to the absolute
         # top of the draw.io page grid (0, 1169, 2338, ...).
-        if moved_to_new_page_for_header and cursor_y >= page_h:
+        if moved_to_new_page_for_header and cursor_y >= page_step:
             cursor_y = _abs_page_top(cursor_y) + 2
         theme_header_boxes.append((theme, Box(sx, cursor_y, col_w, theme_header_h)))
         is_later_page = _page_top(cursor_y) != 0
@@ -337,19 +356,31 @@ def _build_layout_for_columns(
         touched_cols = {col_idx}
 
         pending = list(teams_in_theme)
+        anchor_first_team = True
         while pending:
             # Best-fit across all columns: fill existing holes on the current page
             # before forcing a page break.
             fit_candidates: List[Tuple[int, int, int, TeamModel, int]] = []
-            for team in pending:
+            if anchor_first_team:
+                # Keep visual coherence: first team stays under its theme header.
+                team = pending[0]
                 team_h = team_dims[team.id][5]
-                for i in range(cols):
-                    y = max(work_col_heights[i], theme_floor_y)
-                    remaining = _page_bottom(y) - y
-                    if team_h <= remaining:
-                        leftover = remaining - team_h
-                        # min leftover first, then larger blocks.
-                        fit_candidates.append((leftover, -team_h, y, team, i))
+                i = col_idx
+                y = max(work_col_heights[i], theme_floor_y)
+                remaining = _page_bottom(y) - y
+                if team_h <= remaining:
+                    leftover = remaining - team_h
+                    fit_candidates.append((leftover, -team_h, y, team, i))
+            else:
+                for team in pending:
+                    team_h = team_dims[team.id][5]
+                    for i in range(cols):
+                        y = max(work_col_heights[i], theme_floor_y)
+                        remaining = _page_bottom(y) - y
+                        if team_h <= remaining:
+                            leftover = remaining - team_h
+                            # min leftover first, then larger blocks.
+                            fit_candidates.append((leftover, -team_h, y, team, i))
 
             chosen_team: TeamModel
             chosen_col_idx: int
@@ -365,20 +396,28 @@ def _build_layout_for_columns(
                 )
             else:
                 spill_candidates: List[Tuple[int, int, int, TeamModel, int]] = []
-                for team in pending:
+                if anchor_first_team:
+                    team = pending[0]
                     team_h = team_dims[team.id][5]
-                    for i in range(cols):
-                        y = max(work_col_heights[i], theme_floor_y)
-                        overflow = max(0, y + team_h - _page_bottom(y))
-                        # min overflow first, then larger blocks.
-                        spill_candidates.append((overflow, -team_h, y, team, i))
+                    i = col_idx
+                    y = max(work_col_heights[i], theme_floor_y)
+                    overflow = max(0, y + team_h - _page_bottom(y))
+                    spill_candidates.append((overflow, -team_h, y, team, i))
+                else:
+                    for team in pending:
+                        team_h = team_dims[team.id][5]
+                        for i in range(cols):
+                            y = max(work_col_heights[i], theme_floor_y)
+                            overflow = max(0, y + team_h - _page_bottom(y))
+                            # min overflow first, then larger blocks.
+                            spill_candidates.append((overflow, -team_h, y, team, i))
                 _, _, chosen_y, chosen_team, chosen_col_idx = min(
                     spill_candidates,
                     key=lambda x: (x[0], x[2], x[1]),
                 )
                 team_h = team_dims[chosen_team.id][5]
                 if max(0, chosen_y + team_h - _page_bottom(chosen_y)) > overflow_tolerance_px and team_h <= fresh_page_capacity:
-                    chosen_y = _page_top(chosen_y) + page_h
+                    chosen_y = _page_top(chosen_y) + page_step
 
             info_h, mission_h, kpi_h, warning_h, epic_heights, team_h = team_dims[chosen_team.id]
             sx_for_team = margin + chosen_col_idx * (col_w + col_gap)
@@ -415,6 +454,7 @@ def _build_layout_for_columns(
             work_col_heights[chosen_col_idx] = chosen_y + team_h + team_gap_y
             touched_cols.add(chosen_col_idx)
             pending.remove(chosen_team)
+            anchor_first_team = False
 
         for i in touched_cols:
             col_heights[i] = work_col_heights[i] + section_gap_y
@@ -429,7 +469,7 @@ def _build_layout_for_columns(
         sep_chars = max(34, int((col_w - 30) / 8))
 
         def _sep_page_top(y: int) -> int:
-            return (max(int(y), 0) // page_h) * page_h
+            return (max(int(y), 0) // page_step) * page_step
 
         def _sep_page_bottom(y: int) -> int:
             return _sep_page_top(y) + page_h - page_bottom_margin
@@ -440,7 +480,7 @@ def _build_layout_for_columns(
             sy = sep_col_heights[col_idx]
             eh = _epic_height(e, max_chars=sep_chars, include_intention_summary=True) + 10
             if sy + eh > _sep_page_bottom(sy):
-                sy = _sep_page_top(sy) + page_h
+                sy = _sep_page_top(sy) + page_step
             separate_epic_boxes[e.id] = Box(sx, sy, col_w, eh)
             sep_col_heights[col_idx] = sy + eh + 15
 
@@ -470,6 +510,8 @@ def compute_layout(
     cartouche_h = 50
     page_w = 1654  # A3 landscape
     page_h = 1169  # A3 landscape
+    page_gap = 24
+    page_step = page_h + page_gap
     full_w = page_w - 2 * margin
 
     cartouche = Box(x=margin, y=margin, w=full_w, h=cartouche_h)
@@ -514,7 +556,7 @@ def compute_layout(
     if alert_h > 0 and high_fragmentation_box and unassigned_people_box:
         # Place alerts on a dedicated new page.
         alert_top_margin = 12
-        alerts_y = ((int(_max_y) // page_h) + 1) * page_h + alert_top_margin
+        alerts_y = ((int(_max_y) // page_step) + 1) * page_step + alert_top_margin
         high_fragmentation_box = Box(
             x=high_fragmentation_box.x,
             y=alerts_y,

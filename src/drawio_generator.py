@@ -39,6 +39,19 @@ def _sorted_members(members: set[str]) -> List[str]:
     return sorted([m for m in members if m and m != "UNKNOWN"])
 
 
+def _sorted_epic_assignment_members(epic: EpicModel) -> List[str]:
+    members = {
+        (a.person or "").strip()
+        for a in epic.assignments
+        if (a.role or "").strip().upper() not in {"PM", "PO"}
+    }
+    return sorted([m for m in members if m and m != "UNKNOWN"])
+
+
+def _is_management_role(role: str) -> bool:
+    return (role or "").strip().upper() in {"PM", "PO"}
+
+
 def _split_sentences(text: str) -> List[str]:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
     if not cleaned:
@@ -295,7 +308,6 @@ def build_drawio(
                 po=", ".join(epic.po_list) if epic.po_list else "—",
                 team_name=team.name,
                 team_po_list=team.po_list,
-                team_members=_sorted_members(team.people_team),
             )
             ecell = _mx_cell(root, id=str(next_id), value=epic_value, style=epic_style, vertex="1", parent=team_id)
             _mx_geometry(ecell, eb.x - tb.x, eb.y - tb.y, eb.w, eb.h)  # relative to container
@@ -322,24 +334,25 @@ def _format_epic_value(
     po: str = "",
     team_name: Optional[str] = None,
     team_po_list: Optional[List[str]] = None,
-    team_members: Optional[List[str]] = None,
     include_intention_summary: bool = False,
 ) -> str:
+    display_assignments = [a for a in epic.assignments if not _is_management_role(a.role)]
     lines = [f"<div style=\"text-align:center;\"><b>🧩 {_html_escape(epic.name)}</b></div>"]
     if team_name:
         lines.append(f"<b>Equipe :</b> {_html_escape(team_name)}")
-    if team_po_list is not None and epic.assignments:
+    if team_po_list is not None and display_assignments:
         lines.append(f"<b>PO equipe :</b> {_html_escape(', '.join(team_po_list) if team_po_list else '—')}")
-    if team_members is not None and epic.assignments:
-        members_text = ", ".join(team_members) if team_members else "—"
-        lines.append(f"<b>Membres equipe :</b> {_html_escape(members_text)}")
-    if show_po and epic.assignments:
+    if team_name is not None and display_assignments:
+        epic_members = _sorted_epic_assignment_members(epic)
+        members_text = ", ".join(epic_members) if epic_members else "—"
+        lines.append(f"<b>Membres epic :</b> {_html_escape(members_text)}")
+    if show_po and display_assignments:
         lines.append(f"<b>PO epic :</b> {_html_escape(po)}")
-    has_details = bool(epic.assignments or epic.features)
+    has_details = bool(display_assignments or epic.features)
     if has_details:
         lines.append("—")
-    if epic.assignments:
-        for a in epic.assignments:
+    if display_assignments:
+        for a in display_assignments:
             person = (a.person or "").strip() or "—"
             role = (a.role or "").strip() or "—"
             assignment_line = f"{_html_escape(person)} – {_html_escape(role)} – {_format_charge_percent(a.charge)}"

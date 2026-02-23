@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import os
 from pathlib import Path
 import subprocess
@@ -42,6 +43,11 @@ def _ensure_output_dir(repo_root: Path) -> Path:
     out = repo_root / "output"
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def _short_timestamp() -> str:
+    # Short local timestamp for output filenames, e.g. 260223-1542.
+    return datetime.now().strftime("%y%m%d-%H%M")
 
 
 def _load_generate_ppt():
@@ -320,6 +326,7 @@ def cmd_full_run(args) -> int:
             data = load_from_grist_file(default_file, mapping)
 
     out = _ensure_output_dir(repo_root)
+    ts = _short_timestamp()
     team_llm_ok, team_llm_reason = get_team_llm_status(deep_check=True)
     if team_llm_ok:
         print("🤖 LLM Synthèse/Draw.io: actif")
@@ -347,13 +354,13 @@ def cmd_full_run(args) -> int:
         high_fragmented_people=high_fragmented,
         low_or_unassigned_people=low_or_unassigned,
     )
-    orgchart_path = out / "orgchart.drawio"
+    orgchart_path = out / f"{model.pi}_orgchart.drawio"
     orgchart_path.write_text(drawio_xml, encoding="utf-8")
 
     frag_kpis = write_fragmentation_reports(
         frag_df,
-        out_csv=str(out / "multi_affectations.csv"),
-        out_md=str(out / "synthesis.md"),
+        out_csv=str(out / f"{model.pi}_multi_affectations.csv"),
+        out_md=str(out / f"{model.pi}_{ts}_synthesis.md"),
     )
 
     # find epics missing intentions/description
@@ -367,7 +374,12 @@ def cmd_full_run(args) -> int:
             missing.append(e.name)
 
     # README generated
-    generate_readme(model, str(out / "README_generated.md"))
+    generate_readme(
+        model,
+        str(out / f"{model.pi}_{ts}_README_generated.md"),
+        synthesis_filename=f"{model.pi}_{ts}_synthesis.md",
+        run_summary_filename=f"{model.pi}_{ts}_run_summary.md",
+    )
 
     # PPT
     ppt_path = out / f"{model.pi}_Synthese_SDID.pptx"
@@ -381,7 +393,7 @@ def cmd_full_run(args) -> int:
         model=model,
         frag_kpis=frag_kpis,
         source_label=source_label,
-        out_md=str(out / "run_summary.md"),
+        out_md=str(out / f"{model.pi}_{ts}_run_summary.md"),
         features_table_empty=bool(data.features.empty),
         epics_missing_intentions=sorted(set(missing)),
     )

@@ -113,13 +113,13 @@ python -m src.cli ppt --llm --api --pi PI-6
 
 Dans `output/` :
 
-- `orgchart.drawio`
-- `multi_affectations.csv`
-- `synthesis.md`
+- `PI-<X>_orgchart.drawio`
+- `PI-<X>_multi_affectations.csv`
+- `PI-<X>_<YYMMDD-HHMM>_synthesis.md`
 - `PI-<X>_Synthese_SDID.pptx`
 - `PI-<X>_Synthese_Epics.xlsx`
-- `README_generated.md`
-- `run_summary.md`
+- `PI-<X>_<YYMMDD-HHMM>_README_generated.md`
+- `PI-<X>_<YYMMDD-HHMM>_run_summary.md`
 
 Le fichier Excel contient 2 onglets :
 - `Synthese_Epics` : identifiant EPIC, titre, description/intention originales, synthèse courte, évaluation de couverture des features.

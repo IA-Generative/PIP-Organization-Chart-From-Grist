@@ -9,7 +9,12 @@ def _sorted_members(members: set[str]) -> List[str]:
     return sorted([m for m in members if m and m != "UNKNOWN"])
 
 
-def generate_readme(model: BuiltModel, out_path: str) -> None:
+def generate_readme(
+    model: BuiltModel,
+    out_path: str,
+    synthesis_filename: str = "synthesis.md",
+    run_summary_filename: str = "run_summary.md",
+) -> None:
     lines: List[str] = []
     lines.append(f"# README généré — {model.pi}")
     lines.append("")
@@ -30,10 +35,10 @@ def generate_readme(model: BuiltModel, out_path: str) -> None:
     lines.append("")
     lines.append("## Structure des sorties")
     lines.append("")
-    lines.append("- `orgchart.drawio` : diagramme organisationnel")
-    lines.append("- `multi_affectations.csv` + `synthesis.md` : fragmentation")
+    lines.append(f"- `{model.pi}_orgchart.drawio` : diagramme organisationnel")
+    lines.append(f"- `{model.pi}_multi_affectations.csv` + `{synthesis_filename}` : fragmentation")
     lines.append(f"- `PI-{model.pi.split('-')[-1]}_Synthese_SDID.pptx` : PowerPoint de synthèse")
-    lines.append("- `run_summary.md` : checklist d’exécution")
+    lines.append(f"- `{run_summary_filename}` : checklist d’exécution")
     lines.append("")
     lines.append("## Membres par équipe")
     lines.append("")
