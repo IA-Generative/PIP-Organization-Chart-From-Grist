@@ -57,6 +57,19 @@ def _load_generate_ppt():
     return _generate_ppt, _get_llm_status
 
 
+def _load_generate_excel():
+    try:
+        from .excel_generator import generate_epics_excel as _generate_epics_excel
+    except ModuleNotFoundError as exc:
+        if exc.name == "openpyxl":
+            print("❌ Dépendance manquante: openpyxl")
+            print("Installez les dépendances puis relancez :")
+            print("python -m pip install -e .")
+            raise SystemExit(2)
+        raise
+    return _generate_epics_excel
+
+
 def _open_orgchart_file(path: Path) -> None:
     if not path.exists():
         return
@@ -128,6 +141,43 @@ def _open_ppt_file(path: Path) -> None:
             return
     except Exception as exc:
         print(f"⚠️ Impossible d'ouvrir automatiquement le PowerPoint: {exc}")
+
+
+def _open_excel_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        if sys.platform == "darwin":
+            # Prefer Microsoft Excel app when available.
+            probe = subprocess.run(
+                ["open", "-Ra", "Microsoft Excel"],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0:
+                res = subprocess.run(
+                    ["open", "-a", "Microsoft Excel", str(path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    print(f"Ouverture locale dans Microsoft Excel: {path}")
+                    return
+            subprocess.run(["open", str(path)], check=False)
+            print(f"Ouverture locale: {path}")
+            return
+
+        if sys.platform.startswith("linux"):
+            subprocess.run(["xdg-open", str(path)], check=False)
+            print(f"Ouverture locale: {path}")
+            return
+
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            print(f"Ouverture locale: {path}")
+            return
+    except Exception as exc:
+        print(f"⚠️ Impossible d'ouvrir automatiquement l'Excel: {exc}")
 
 
 def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str], List[str]]:
@@ -217,6 +267,7 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
 
 def cmd_full_run(args) -> int:
     generate_ppt, get_llm_status = _load_generate_ppt()
+    generate_epics_excel = _load_generate_excel()
     repo_root = Path(__file__).resolve().parents[1]
     mapping = _load_mapping(repo_root)
     os.environ["ENABLE_LLM"] = "1" if getattr(args, "llm", False) else "0"
@@ -321,6 +372,9 @@ def cmd_full_run(args) -> int:
     # PPT
     ppt_path = out / f"{model.pi}_Synthese_SDID.pptx"
     generate_ppt(model, frag_kpis, str(ppt_path), frag_df=frag_df)
+    excel_path = out / f"{model.pi}_Synthese_Epics.xlsx"
+    generate_epics_excel(model, str(excel_path))
+    print(f"✅ Excel généré: {excel_path}")
 
     # Run summary
     write_run_summary(
@@ -333,6 +387,7 @@ def cmd_full_run(args) -> int:
     )
     _open_orgchart_file(orgchart_path)
     _open_ppt_file(ppt_path)
+    _open_excel_file(excel_path)
 
     return 0
 
@@ -423,6 +478,56 @@ def cmd_ppt(args) -> int:
     return 0
 
 
+def cmd_excel(args) -> int:
+    generate_epics_excel = _load_generate_excel()
+    repo_root = Path(__file__).resolve().parents[1]
+    mapping = _load_mapping(repo_root)
+    pi = normalize_pi(args.pi)
+    os.environ["ENABLE_LLM"] = "1" if getattr(args, "llm", False) else "0"
+    os.environ["LLM_LOG_MODE"] = getattr(args, "llm_log", "compact")
+
+    if args.source:
+        data = load_from_grist_file(args.source, mapping)
+    elif args.api:
+        cfg, missing = get_api_config_from_env()
+        if missing:
+            print_api_missing(missing)
+            default_file = _find_default_grist(repo_root)
+            if not default_file:
+                print("❌ Aucun fichier .grist trouvé dans le répertoire data/.")
+                print("Merci de déposer votre fichier Grist dans :")
+                print("data/example_empty.grist")
+                print("OU de fournir le chemin avec --source")
+                return 2
+            print(f"➡️ Bascule en mode fichier local: {default_file}")
+            data = load_from_grist_file(default_file, mapping)
+        else:
+            try:
+                data = load_from_api(cfg, mapping)
+            except Exception as exc:
+                print(f"⚠️ Échec API Grist: {exc}")
+                default_file = _find_default_grist(repo_root)
+                if not default_file:
+                    print("❌ Aucun fichier .grist trouvé pour fallback local.")
+                    return 2
+                print(f"➡️ Bascule en mode fichier local: {default_file}")
+                data = load_from_grist_file(default_file, mapping)
+    else:
+        default_file = _find_default_grist(repo_root)
+        if not default_file:
+            print("❌ Aucun fichier .grist trouvé. Fournir --source ou --api.")
+            return 2
+        data = load_from_grist_file(default_file, mapping)
+
+    model = build_model(data=data, mapping=mapping, pi=pi)
+    out = _ensure_output_dir(repo_root)
+    excel_path = out / f"{model.pi}_Synthese_Epics.xlsx"
+    generate_epics_excel(model, str(excel_path))
+    print(f"✅ Excel généré: {excel_path}")
+    _open_excel_file(excel_path)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="SDID PI Planning: Grist → draw.io + fragmentation + PPT")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -455,6 +560,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp4.add_argument("--llm-log", choices=["quiet", "compact", "verbose"], default="compact",
                      help="Niveau de logs LLM (quiet|compact|verbose)")
     sp4.set_defaults(func=cmd_ppt)
+
+    sp5 = sub.add_parser("excel", help="Génère seulement le fichier Excel de synthèse des epics")
+    sp5.add_argument("--pi", required=True, help="Numéro de PI (ex: PI-10 ou 10)")
+    sp5.add_argument("--source", help="Chemin vers un fichier .grist local")
+    sp5.add_argument("--api", action="store_true", help="Utiliser l'API Grist (si variables env configurées)")
+    sp5.add_argument("--llm", action="store_true", help="Activer les appels LLM (sinon fallback local)")
+    sp5.add_argument("--llm-log", choices=["quiet", "compact", "verbose"], default="compact",
+                     help="Niveau de logs LLM (quiet|compact|verbose)")
+    sp5.set_defaults(func=cmd_excel)
 
     return p
 

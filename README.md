@@ -5,6 +5,7 @@ Génère automatiquement (à partir d’un Grist SDID) :
 - une **visualisation draw.io** : **Équipes → Epics → Features** (+ cartouche PI)
 - une **analyse de fragmentation** : agents multi-affectés / multi-contextes
 - un **PowerPoint de synthèse** PI Planning (basé sur template, avec slides de cadrage puis groupes par équipe)
+- un **Excel de synthèse des EPICs** (résumés + couverture intention/features + propositions de nouvelles features)
 - un **README généré** contextualisé pour le PI
 
 ## Prérequis
@@ -116,8 +117,14 @@ Dans `output/` :
 - `multi_affectations.csv`
 - `synthesis.md`
 - `PI-<X>_Synthese_SDID.pptx`
+- `PI-<X>_Synthese_Epics.xlsx`
 - `README_generated.md`
 - `run_summary.md`
+
+Le fichier Excel contient 2 onglets :
+- `Synthese_Epics` : identifiant EPIC, titre, description/intention originales, synthèse courte, évaluation de couverture des features.
+- `Propositions_Features` : propositions de nouvelles features avec gains espérés.
+- Les textes reformulés par IA sont suffixés avec `(🤖)`.
 
 ## PowerPoint (template)
 
@@ -166,10 +173,14 @@ Dans `output/` :
 - Diagramme seul : `diagram`
 - Analyse seule : `analyze`
 - PPT seul : `ppt` (`--source` ou `--api`)
-- Le flag `--llm` est disponible sur `full-run`, `diagram` et `ppt`.
+- Excel seul : `excel` (`--source` ou `--api`)
+- Le flag `--llm` est disponible sur `full-run`, `diagram`, `ppt` et `excel`.
 - Variables utiles de parallélisme LLM :
   - `LLM_SYNTH_MAX_WORKERS` (synthèse équipe pour Draw.io/PPT, défaut `32`, plafond `256`)
   - `LLM_PPT_MAX_WORKERS` (reformulation PPT, défaut `16`, plafond `256`)
+  - `EXCEL_LLM_MAX_WORKERS` (analyse EPICs pour Excel, défaut `32`, plafond `256`)
+- Modèle LLM Excel :
+  - `EXCEL_LLM_MODEL` (défaut `ossgpt`)
 
 ## Statut LLM
 
