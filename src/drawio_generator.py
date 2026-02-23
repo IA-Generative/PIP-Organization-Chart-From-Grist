@@ -95,7 +95,7 @@ def _format_team_mission_value(team: TeamModel) -> str:
     next_inc = (team.next_increment_summary or "").strip() or "Intention prochain increment non renseignee."
     mission_html = _html_escape(mission).replace("\n", "<br/>")
     next_html = _html_escape(next_inc).replace("\n", "<br/>")
-    suffix = " (résumé par IA)" if team.summary_ai_used else ""
+    suffix = " (🤖)" if team.summary_ai_used else ""
     return (
         f'<div style="text-align:center;color:#1f4e79;"><b>Mission{_html_escape(suffix)}</b></div>'
         f"<br/>{mission_html}"
@@ -116,7 +116,7 @@ def _format_team_kpi_value(team: TeamModel) -> str:
     suggestion = (team.kpi_ai_suggestion or "").strip() or "Suggestion IA non disponible."
     kpi_html = _html_escape(kpis).replace("\n", "<br/>")
     suggestion_html = _html_escape(suggestion).replace("\n", "<br/>")
-    suffix = " (résumé par IA)" if team.summary_ai_used else ""
+    suffix = " (🤖)" if team.summary_ai_used else ""
     return (
         f'<div style="text-align:center;color:#1f4e79;"><b>Indicateurs clés (OKR / KPI){_html_escape(suffix)}</b></div>'
         '<table style="width:100%; border-collapse:collapse; margin-top:6px;" cellspacing="0" cellpadding="0">'

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
@@ -37,6 +37,8 @@ class TeamModel:
     po_list: List[str]
     people_team: Set[str]
     epics: List[EpicModel]
+    member_total_charge: Dict[str, float] = field(default_factory=dict)
+    member_roles: Dict[str, List[str]] = field(default_factory=dict)
     mission_summary: str = ""
     next_increment_summary: str = ""
     kpi_summary: str = ""
@@ -167,6 +169,8 @@ def build_model(
     team_people: Dict[int, Set[str]] = {}
     team_pms: Dict[int, List[str]] = {}
     team_pos: Dict[int, List[str]] = {}
+    team_member_charge: Dict[int, Dict[str, float]] = {}
+    team_member_roles: Dict[int, Dict[str, List[str]]] = {}
 
     if not affectations.empty:
         # Resolve person label
@@ -184,12 +188,30 @@ def build_model(
             team_pms[int(tid)] = sorted([p for p in pms if p and p != "UNKNOWN"])
             pos = grp_pos.loc[grp_pos["_role"] == po_role, "_person_label"].unique().tolist()
             team_pos[int(tid)] = sorted([p for p in pos if p and p != "UNKNOWN"])
+
+            # Aggregate directly from Affectations table at team level.
+            charge_map: Dict[str, float] = {}
+            roles_map: Dict[str, Set[str]] = {}
+            for _, row in grp.iterrows():
+                person = _safe_str(row.get("_person_label")).strip()
+                if not person or person == "UNKNOWN":
+                    continue
+                charge_map[person] = charge_map.get(person, 0.0) + float(row.get(aff_charge) or 0.0)
+                role = _safe_str(row.get("_role")).strip()
+                if role:
+                    roles_map.setdefault(person, set()).add(role)
+            team_member_charge[int(tid)] = charge_map
+            team_member_roles[int(tid)] = {
+                person: sorted(list(role_set)) for person, role_set in roles_map.items()
+            }
     else:
         # Empty: create empty sets for listed teams
         for tid in equipes["id"].tolist():
             team_people[int(tid)] = set()
             team_pms[int(tid)] = []
             team_pos[int(tid)] = []
+            team_member_charge[int(tid)] = {}
+            team_member_roles[int(tid)] = {}
 
     # Pre-compute epic assignments and PO lists
     epic_assignments: Dict[int, List[AssignmentLine]] = {}
@@ -328,6 +350,8 @@ def build_model(
                 po_list=po_list,
                 people_team=people_t,
                 epics=epic_models,
+                member_total_charge=team_member_charge.get(tid, {}),
+                member_roles=team_member_roles.get(tid, {}),
                 mission_summary="",
                 next_increment_summary="",
                 summary_ai_used=False,

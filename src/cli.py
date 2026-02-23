@@ -19,7 +19,7 @@ from .analytics import compute_fragmentation
 from .report_generator import write_fragmentation_reports, write_run_summary
 from .readme_generator import generate_readme
 from .ref_utils import parse_ref_id
-from .team_mission_summarizer import populate_team_missions
+from .team_mission_summarizer import populate_team_missions, get_llm_status as get_team_llm_status
 
 
 def _load_mapping(repo_root: Path) -> dict:
@@ -46,7 +46,7 @@ def _ensure_output_dir(repo_root: Path) -> Path:
 
 def _load_generate_ppt():
     try:
-        from .ppt_generator import generate_ppt as _generate_ppt
+        from .ppt_generator import generate_ppt as _generate_ppt, get_llm_status as _get_llm_status
     except ModuleNotFoundError as exc:
         if exc.name == "pptx":
             print("❌ Dépendance manquante: python-pptx")
@@ -54,7 +54,7 @@ def _load_generate_ppt():
             print("python -m pip install -e .")
             raise SystemExit(2)
         raise
-    return _generate_ppt
+    return _generate_ppt, _get_llm_status
 
 
 def _open_orgchart_file(path: Path) -> None:
@@ -91,6 +91,43 @@ def _open_orgchart_file(path: Path) -> None:
             return
     except Exception as exc:
         print(f"⚠️ Impossible d'ouvrir automatiquement le diagramme: {exc}")
+
+
+def _open_ppt_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        if sys.platform == "darwin":
+            # Prefer Microsoft PowerPoint app when available.
+            probe = subprocess.run(
+                ["open", "-Ra", "Microsoft PowerPoint"],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0:
+                res = subprocess.run(
+                    ["open", "-a", "Microsoft PowerPoint", str(path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    print(f"Ouverture locale dans Microsoft PowerPoint: {path}")
+                    return
+            subprocess.run(["open", str(path)], check=False)
+            print(f"Ouverture locale: {path}")
+            return
+
+        if sys.platform.startswith("linux"):
+            subprocess.run(["xdg-open", str(path)], check=False)
+            print(f"Ouverture locale: {path}")
+            return
+
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            print(f"Ouverture locale: {path}")
+            return
+    except Exception as exc:
+        print(f"⚠️ Impossible d'ouvrir automatiquement le PowerPoint: {exc}")
 
 
 def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str], List[str]]:
@@ -179,9 +216,11 @@ def _compute_alert_people_lists(data, mapping: dict, frag_df) -> Tuple[List[str]
 
 
 def cmd_full_run(args) -> int:
-    generate_ppt = _load_generate_ppt()
+    generate_ppt, get_llm_status = _load_generate_ppt()
     repo_root = Path(__file__).resolve().parents[1]
     mapping = _load_mapping(repo_root)
+    os.environ["ENABLE_LLM"] = "1" if getattr(args, "llm", False) else "0"
+    os.environ["LLM_LOG_MODE"] = getattr(args, "llm_log", "compact")
 
     pi = normalize_pi(args.pi)
 
@@ -230,6 +269,16 @@ def cmd_full_run(args) -> int:
             data = load_from_grist_file(default_file, mapping)
 
     out = _ensure_output_dir(repo_root)
+    team_llm_ok, team_llm_reason = get_team_llm_status(deep_check=True)
+    if team_llm_ok:
+        print("🤖 LLM Synthèse/Draw.io: actif")
+    else:
+        print(f"🤖 LLM Synthèse/Draw.io: inactif ({team_llm_reason})")
+    llm_ok, llm_reason = get_llm_status(deep_check=True)
+    if llm_ok:
+        print("🤖 LLM PPT: actif")
+    else:
+        print(f"🤖 LLM PPT: inactif ({llm_reason})")
 
     frag_df = compute_fragmentation(data, mapping)
     high_fragmented, low_or_unassigned = _compute_alert_people_lists(data, mapping, frag_df)
@@ -271,7 +320,7 @@ def cmd_full_run(args) -> int:
 
     # PPT
     ppt_path = out / f"{model.pi}_Synthese_SDID.pptx"
-    generate_ppt(model, frag_kpis, str(ppt_path))
+    generate_ppt(model, frag_kpis, str(ppt_path), frag_df=frag_df)
 
     # Run summary
     write_run_summary(
@@ -283,6 +332,7 @@ def cmd_full_run(args) -> int:
         epics_missing_intentions=sorted(set(missing)),
     )
     _open_orgchart_file(orgchart_path)
+    _open_ppt_file(ppt_path)
 
     return 0
 
@@ -315,25 +365,61 @@ def cmd_analyze(args) -> int:
 
 
 def cmd_ppt(args) -> int:
-    generate_ppt = _load_generate_ppt()
+    generate_ppt, get_llm_status = _load_generate_ppt()
     repo_root = Path(__file__).resolve().parents[1]
     mapping = _load_mapping(repo_root)
     pi = normalize_pi(args.pi)
-    if not args.source:
+    os.environ["ENABLE_LLM"] = "1" if getattr(args, "llm", False) else "0"
+    os.environ["LLM_LOG_MODE"] = getattr(args, "llm_log", "compact")
+    llm_ok, llm_reason = get_llm_status(deep_check=True)
+    if llm_ok:
+        print("🤖 LLM PPT: actif")
+    else:
+        print(f"🤖 LLM PPT: inactif ({llm_reason})")
+
+    # Determine source (same behavior as full-run for API fallback).
+    if args.source:
+        data = load_from_grist_file(args.source, mapping)
+    elif args.api:
+        cfg, missing = get_api_config_from_env()
+        if missing:
+            print_api_missing(missing)
+            default_file = _find_default_grist(repo_root)
+            if not default_file:
+                print("❌ Aucun fichier .grist trouvé dans le répertoire data/.")
+                print("Merci de déposer votre fichier Grist dans :")
+                print("data/example_empty.grist")
+                print("OU de fournir le chemin avec --source")
+                return 2
+            print(f"➡️ Bascule en mode fichier local: {default_file}")
+            data = load_from_grist_file(default_file, mapping)
+        else:
+            try:
+                data = load_from_api(cfg, mapping)
+            except Exception as exc:
+                print(f"⚠️ Échec API Grist: {exc}")
+                default_file = _find_default_grist(repo_root)
+                if not default_file:
+                    print("❌ Aucun fichier .grist trouvé pour fallback local.")
+                    return 2
+                print(f"➡️ Bascule en mode fichier local: {default_file}")
+                data = load_from_grist_file(default_file, mapping)
+    else:
         default_file = _find_default_grist(repo_root)
         if not default_file:
-            print("❌ Aucun fichier .grist trouvé. Fournir --source.")
+            print("❌ Aucun fichier .grist trouvé. Fournir --source ou --api.")
             return 2
-        args.source = default_file
-    data = load_from_grist_file(args.source, mapping)
+        data = load_from_grist_file(default_file, mapping)
+
     model = build_model(data=data, mapping=mapping, pi=pi)
     out = _ensure_output_dir(repo_root)
     frag_df = compute_fragmentation(data, mapping)
     frag_kpis = {"agents_over_100": int((frag_df["Total_Charge"]>100).sum()) if not frag_df.empty else 0,
                 "agents_multi_team": int((frag_df["Nb_Equipes"]>1).sum()) if not frag_df.empty else 0}
     ppt_path = out / f"{model.pi}_Synthese_SDID.pptx"
-    generate_ppt(model, frag_kpis, str(ppt_path))
+    generate_ppt(model, frag_kpis, str(ppt_path), frag_df=frag_df)
     print(f"✅ PowerPoint généré: {ppt_path}")
+    _open_ppt_file(ppt_path)
     return 0
 
 
@@ -345,6 +431,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--pi", required=True, help="Numéro de PI (ex: PI-10 ou 10)")
         sp.add_argument("--source", help="Chemin vers un fichier .grist local")
         sp.add_argument("--api", action="store_true", help="Utiliser l'API Grist (si variables env configurées)")
+        sp.add_argument("--llm", action="store_true", help="Activer les appels LLM (sinon fallback local)")
+        sp.add_argument("--llm-log", choices=["quiet", "compact", "verbose"], default="compact",
+                        help="Niveau de logs LLM (quiet|compact|verbose)")
 
     sp = sub.add_parser("full-run", help="Génère draw.io + analyse + ppt + readme + summary")
     add_common(sp)
@@ -361,6 +450,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp4 = sub.add_parser("ppt", help="Génère seulement le PowerPoint")
     sp4.add_argument("--pi", required=True, help="Numéro de PI (ex: PI-10 ou 10)")
     sp4.add_argument("--source", help="Chemin vers un fichier .grist local")
+    sp4.add_argument("--api", action="store_true", help="Utiliser l'API Grist (si variables env configurées)")
+    sp4.add_argument("--llm", action="store_true", help="Activer les appels LLM (sinon fallback local)")
+    sp4.add_argument("--llm-log", choices=["quiet", "compact", "verbose"], default="compact",
+                     help="Niveau de logs LLM (quiet|compact|verbose)")
     sp4.set_defaults(func=cmd_ppt)
 
     return p

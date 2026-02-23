@@ -4,7 +4,7 @@ Génère automatiquement (à partir d’un Grist SDID) :
 
 - une **visualisation draw.io** : **Équipes → Epics → Features** (+ cartouche PI)
 - une **analyse de fragmentation** : agents multi-affectés / multi-contextes
-- un **PowerPoint de synthèse** PI Planning (planche de synthèse + slides équipes/epics)
+- un **PowerPoint de synthèse** PI Planning (basé sur template, avec slides de cadrage puis groupes par équipe)
 - un **README généré** contextualisé pour le PI
 
 ## Prérequis
@@ -76,10 +76,37 @@ python -m src.cli full-run --api --pi PI-10
 
 Option mission d'equipe par LLM (Scaleway) :
 - définir `SCW_SECRET_KEY_LLM` dans l'environnement
-- optionnel : `SCW_LLM_MODEL` (défaut `gpt-oss-120b`) et `SCW_LLM_BASE_URL`
+- optionnel : `SCW_LLM_MODEL` (défaut `mistral-small-3.2-24b-instruct-2506`) et `SCW_LLM_BASE_URL`
+- activer explicitement avec le flag `--llm` (sinon fallback local forcé)
 - sans clé ou en cas d'erreur API, le script utilise un fallback local
 
 Si les paramètres API ne sont pas configurés, le script bascule en mode fichier local et vous indiquera quoi faire.
+
+### 3) Générer uniquement le PowerPoint
+
+Mode fichier local :
+
+```zsh
+python -m src.cli ppt --source data/example_empty.grist --pi PI-6
+```
+
+Mode fichier local + LLM :
+
+```zsh
+python -m src.cli ppt --llm --source data/example_empty.grist --pi PI-6
+```
+
+Mode API (avec fallback automatique sur fichier local si API indisponible) :
+
+```zsh
+python -m src.cli ppt --api --pi PI-6
+```
+
+Mode API + LLM :
+
+```zsh
+python -m src.cli ppt --llm --api --pi PI-6
+```
 
 ## Sorties
 
@@ -91,6 +118,28 @@ Dans `output/` :
 - `PI-<X>_Synthese_SDID.pptx`
 - `README_generated.md`
 - `run_summary.md`
+
+## PowerPoint (template)
+
+- Le générateur PPT utilise `data/template.ppt.pptx`.
+- Le fichier généré est `output/PI-<X>_Synthese_SDID.pptx`.
+- Structure actuelle du template :
+  - Planche 1 : titre général
+  - Planche 2 : vue d’ensemble PI (infos + stats + population d’agents)
+  - Planche 3 : agents avec fragmentation d’affectation
+  - Planche 4 : agents avec faible affectation (`<10%`)
+  - Puis, par équipe, un groupe de 3 planches :
+    - Équipe
+    - Finalités et ambition du PIP
+    - Features
+- La planche **Équipe** inclut un tableau : `Membre | Qualité | Affectation %` (lignes à `0.0%` filtrées).
+- La planche **Fragmentation** inclut un tableau : `Agent | Equipes | Epics | Affect. | Charge % | Score`.
+- Mise en forme appliquée par le générateur :
+  - police `Marianne`
+  - retour à la ligne automatique (`word wrap`)
+  - ajustement automatique du texte à la zone (`text-to-fit`)
+  - limitation des indentations pour exploiter toute la largeur des blocs du template
+  - titres de planches en capitales
 
 ## Logique métier
 
@@ -112,7 +161,15 @@ Dans `output/` :
 - Pipeline complet : `full-run`
 - Diagramme seul : `diagram`
 - Analyse seule : `analyze`
-- PPT seul : `ppt`
+- PPT seul : `ppt` (`--source` ou `--api`)
+- Le flag `--llm` est disponible sur `full-run`, `diagram` et `ppt`.
+
+## Statut LLM
+
+- Au démarrage, le CLI affiche l'état LLM :
+  - `🤖 LLM Synthèse/Draw.io: actif|inactif (...)`
+  - `🤖 LLM PPT: actif|inactif (...)`
+- Sans `--llm`, les appels LLM sont désactivés (`fallback` local).
 
 Voir `python -m src.cli --help`.
 
